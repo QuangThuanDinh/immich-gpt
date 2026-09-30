@@ -47,7 +47,7 @@ vi.mock("../services/api", () => ({
 
 const {
   treeMock, createMock, examplesMock, promptPreviewMock,
-  plansMock, planSummaryMock, approveMock, rejectMock,
+  classifyMock, plansMock, planSummaryMock, approveMock, rejectMock,
 } = mocks;
 
 import Routing from "../pages/Routing";
@@ -76,6 +76,21 @@ beforeEach(() => {
   planSummaryMock.mockReset();
   approveMock.mockReset();
   rejectMock.mockReset();
+  classifyMock.mockReset();
+  classifyMock.mockResolvedValue({ job_id: "job-1", plan_id: "plan-1", status: "queued" });
+  planSummaryMock.mockResolvedValue({
+    plan_id: "plan-1",
+    total: 0,
+    groups: {
+      auto_applied: [],
+      ready_to_approve: [],
+      needs_review: [],
+      trash_candidates: [],
+      rejected: [],
+      failed: [],
+    },
+  });
+  vi.stubGlobal("alert", vi.fn());
 });
 
 describe("Routing tree page", () => {
@@ -168,6 +183,16 @@ describe("Routing tree page", () => {
     fireEvent.click(screen.getByText("Matching"));
     await waitFor(() => expect(screen.getByText("sharp image")).toBeInTheDocument());
   });
+
+  it("can reprocess all assets from the routing menu", async () => {
+    treeMock.mockResolvedValue({ nodes: [] });
+    render(<Wrapper><Routing /></Wrapper>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run routing options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Reprocess all assets/i }));
+
+    await waitFor(() => expect(classifyMock).toHaveBeenCalledWith({ force: true }));
+  });
 });
 
 describe("Routing plans page", () => {
@@ -175,6 +200,15 @@ describe("Routing plans page", () => {
     plansMock.mockResolvedValue([]);
     render(<Wrapper><RoutingPlans /></Wrapper>);
     await waitFor(() => expect(screen.getByText(/No plans yet/i)).toBeInTheDocument());
+  });
+
+  it("runs only new assets from the primary plan action", async () => {
+    plansMock.mockResolvedValue([]);
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run new plan" }));
+
+    await waitFor(() => expect(classifyMock).toHaveBeenCalledWith({ force: false }));
   });
 
   it("shows plan summary groups when a plan is selected", async () => {

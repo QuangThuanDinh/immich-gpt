@@ -10,6 +10,7 @@ import {
 } from "../services/api";
 import type { RoutingNode } from "../types";
 import RoutingLeafEditor from "../components/RoutingLeafEditor";
+import RunRoutingButton from "../components/RunRoutingButton";
 import {
   Plus,
   Trash2,
@@ -18,7 +19,6 @@ import {
   ChevronDown,
   Folder,
   FolderTree,
-  Play,
 } from "lucide-react";
 
 const inputStyle: React.CSSProperties = {
@@ -210,7 +210,7 @@ export default function Routing() {
   });
 
   const classifyMut = useMutation({
-    mutationFn: () => startRoutingClassify({}),
+    mutationFn: (force: boolean) => startRoutingClassify({ force }),
     onSuccess: (r) => {
       alert(`Routing classification started.\nJob: ${r.job_id}\nPlan: ${r.plan_id}`);
     },
@@ -267,18 +267,11 @@ export default function Routing() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={() => classifyMut.mutate()}
-            disabled={classifyMut.isPending}
-            style={{
-              display: "flex", alignItems: "center", gap: 6,
-              padding: "8px 16px", borderRadius: 8, border: "1px solid #334155",
-              background: "#1e293b", color: "#22c55e", fontSize: 13, fontWeight: 600,
-              cursor: classifyMut.isPending ? "wait" : "pointer",
-            }}
-          >
-            <Play size={13} /> Run routing
-          </button>
+          <RunRoutingButton
+            label="Run routing"
+            pending={classifyMut.isPending}
+            onRun={(force) => classifyMut.mutate(force)}
+          />
           <button
             onClick={handleAddRoot}
             style={{

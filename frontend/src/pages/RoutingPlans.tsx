@@ -10,7 +10,8 @@ import {
 } from "../services/api";
 import type { RoutingPlanSummary, RoutingPlanGroupItem } from "../types";
 import { usePageVisible } from "../hooks/usePageVisible";
-import { CheckCircle2, AlertTriangle, Trash2, XCircle, Clock, Play, type LucideIcon } from "lucide-react";
+import RunRoutingButton from "../components/RunRoutingButton";
+import { CheckCircle2, AlertTriangle, Trash2, XCircle, Clock, type LucideIcon } from "lucide-react";
 
 const GROUP_DEFS: {
   key: keyof RoutingPlanSummary["groups"];
@@ -40,7 +41,7 @@ export default function RoutingPlans() {
   });
 
   const classifyMut = useMutation({
-    mutationFn: () => startRoutingClassify({}),
+    mutationFn: (force: boolean) => startRoutingClassify({ force }),
     onSuccess: (r) => {
       setSelectedPlanId(r.plan_id);
       qc.invalidateQueries({ queryKey: ["routing-plans"] });
@@ -80,18 +81,12 @@ export default function RoutingPlans() {
             Review and apply batches of AI routing decisions.
           </p>
         </div>
-        <button
-          onClick={() => classifyMut.mutate()}
-          disabled={classifyMut.isPending}
-          style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "8px 16px", borderRadius: 8, border: "none",
-            background: "#1e40af", color: "white", fontSize: 13, fontWeight: 600,
-            cursor: classifyMut.isPending ? "wait" : "pointer",
-          }}
-        >
-          <Play size={13} /> Run new plan
-        </button>
+        <RunRoutingButton
+          label="Run new plan"
+          pending={classifyMut.isPending}
+          onRun={(force) => classifyMut.mutate(force)}
+          primary
+        />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 24 }}>
