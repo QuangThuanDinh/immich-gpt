@@ -120,7 +120,7 @@ def _cleanup_expired_tokens() -> None:
 app = FastAPI(
     title="Immich GPT",
     description="AI-first metadata enrichment and organization for Immich",
-    version="0.2.0",
+    version=app_settings.APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -154,7 +154,7 @@ app.include_router(routing.router)
 @app.get("/api/health")
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": app_settings.APP_VERSION}
 
 
 # Serve frontend static files in production
