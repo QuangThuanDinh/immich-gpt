@@ -1,5 +1,5 @@
 import socket
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -147,15 +147,15 @@ def test_custom_openrouter_health_check_uses_models(monkeypatch):
     with patch("openai.OpenAI"):
         provider = OpenRouterProvider(
             "key",
-            base_url="http://192.168.0.19:4000",
+            base_url="http://192.168.0.19:4000/v1",
         )
     with patch("httpx.get") as http_get:
         http_get.return_value.status_code = 200
         assert provider.health_check() is True
-    assert http_get.call_args.args[0] == "http://192.168.0.19:4000/api/v1/models"
+    assert http_get.call_args.args[0] == "http://192.168.0.19:4000/v1/models"
 
 
-def test_openrouter_appends_api_path_to_custom_origin(monkeypatch):
+def test_openrouter_uses_custom_api_base_exactly(monkeypatch):
     monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
 
     with patch("openai.OpenAI") as openai:
@@ -163,18 +163,47 @@ def test_openrouter_appends_api_path_to_custom_origin(monkeypatch):
             "openrouter",
             {
                 "api_key": "key",
-                "base_url": "http://192.168.0.19:4000/",
+                "base_url": "http://192.168.0.19:4000/v1/",
             },
         )
 
-    assert openai.call_args.kwargs["base_url"] == "http://192.168.0.19:4000/api/v1"
+    assert openai.call_args.kwargs["base_url"] == "http://192.168.0.19:4000/v1"
 
 
-def test_openrouter_rejects_base_url_with_path(monkeypatch):
+def test_openrouter_rejects_base_url_with_query(monkeypatch):
     monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
 
-    with pytest.raises(ServiceUrlError, match="must be an origin"):
-        get_openrouter_api_base_url("http://192.168.0.19:4000/custom")
+    with pytest.raises(ServiceUrlError, match="cannot contain a query"):
+        get_openrouter_api_base_url("http://192.168.0.19:4000/v1?tenant=one")
+
+
+def test_openrouter_retries_without_unsupported_temperature(monkeypatch):
+    monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
+    success = MagicMock()
+    success.choices = [MagicMock(message=MagicMock(content='{"ok": true}'))]
+
+    with patch("openai.OpenAI") as openai:
+        completion = openai.return_value.chat.completions.create
+        completion.side_effect = [
+            Exception("UnsupportedParamsError: model doesn't support temperature=0.2"),
+            success,
+        ]
+        provider = OpenRouterProvider(
+            "key",
+            model="gpt-5-mini-1",
+            base_url="http://192.168.0.19:4000/v1",
+        )
+        result = provider.classify_routing(
+            [{"role": "user", "content": "Return JSON"}],
+        )
+
+    assert result == {"ok": True}
+    assert completion.call_count == 2
+    assert completion.call_args_list[0].kwargs["temperature"] == 0.2
+    assert "temperature" not in completion.call_args_list[1].kwargs
+    assert completion.call_args_list[1].kwargs["response_format"] == {
+        "type": "json_object"
+    }
 
 
 def test_build_provider_uses_defaults_for_blank_database_values(monkeypatch):

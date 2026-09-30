@@ -56,8 +56,8 @@ describe("Settings page", () => {
       target: { value: "openrouter" },
     });
 
-    expect(screen.getByPlaceholderText("https://openrouter.ai")).toBeInTheDocument();
-    expect(screen.getByText(/backend appends \/api\/v1/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("https://openrouter.ai/api/v1")).toBeInTheDocument();
+    expect(screen.getByText(/complete API base URL/i)).toBeInTheDocument();
   });
 
   it("supports standard and Azure OpenAI configuration", async () => {

@@ -13,20 +13,21 @@ from .url_validation import ServiceUrlError, validate_service_url
 
 
 OPENROUTER_DEFAULT_ORIGIN = "https://openrouter.ai"
+OPENROUTER_DEFAULT_API_BASE = f"{OPENROUTER_DEFAULT_ORIGIN}/api/v1"
 
 
 def get_openrouter_api_base_url(base_url: Optional[str] = None) -> str:
-    """Return the validated OpenRouter-compatible /api/v1 endpoint."""
-    origin = validate_service_url(
-        base_url or OPENROUTER_DEFAULT_ORIGIN,
+    """Return the validated, complete OpenRouter-compatible API base URL."""
+    api_base = validate_service_url(
+        base_url or OPENROUTER_DEFAULT_API_BASE,
         field_name="OpenRouter Base URL",
     )
-    parsed = urlparse(origin)
-    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+    parsed = urlparse(api_base)
+    if parsed.query or parsed.fragment:
         raise ServiceUrlError(
-            "OpenRouter Base URL must be an origin without a path, query, or fragment"
+            "OpenRouter Base URL cannot contain a query or fragment"
         )
-    return f"{origin.rstrip('/')}/api/v1"
+    return api_base.rstrip("/")
 
 
 class AIProvider(ABC):
@@ -297,7 +298,7 @@ class OpenRouterProvider(AIProvider):
             import httpx
             path = (
                 "key"
-                if self.base_url == f"{OPENROUTER_DEFAULT_ORIGIN}/api/v1"
+                if self.base_url == OPENROUTER_DEFAULT_API_BASE
                 else "models"
             )
             r = httpx.get(
@@ -318,25 +319,33 @@ class OpenRouterProvider(AIProvider):
         image_payload: Optional[dict] = None,
     ) -> Dict[str, Any]:
         messages = _inject_image(prompt_messages, image_payload, detail="low")
-        try:
-            response = self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,  # type: ignore
-                response_format={"type": "json_object"},
-                temperature=0.2,
-                max_tokens=1024,
-            )
-        except Exception as e:
-            err = str(e).lower()
-            if "response_format" in err or "json_object" in err or "unsupported" in err:
+        request: Dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+            "max_tokens": 1024,
+        }
+        for _ in range(3):
+            try:
                 response = self._client.chat.completions.create(
-                    model=self._model,
-                    messages=messages,  # type: ignore
-                    temperature=0.2,
-                    max_tokens=1024,
+                    **request,
                 )
-            else:
-                raise
+                break
+            except Exception as e:
+                error = str(e).lower()
+                unsupported = "unsupported" in error or "doesn't support" in error
+                changed = False
+                if unsupported and "temperature" in error:
+                    changed = request.pop("temperature", None) is not None
+                if unsupported and (
+                    "response_format" in error or "json_object" in error
+                ):
+                    changed = request.pop("response_format", None) is not None or changed
+                if not changed:
+                    raise
+        else:
+            raise RuntimeError("OpenRouter request compatibility retries exhausted")
         raw = response.choices[0].message.content or "{}"
         return _parse_json_content(raw)
 

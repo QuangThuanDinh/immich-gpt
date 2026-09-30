@@ -389,7 +389,7 @@ def test_list_openrouter_models_uses_custom_base_url(client, db, monkeypatch):
     _make_provider(
         db,
         "openrouter",
-        base_url="http://192.168.0.19:4000",
+        base_url="http://192.168.0.19:4000/v1",
     )
     monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
     response = MagicMock()
@@ -402,7 +402,7 @@ def test_list_openrouter_models_uses_custom_base_url(client, db, monkeypatch):
 
     assert r.status_code == 200
     assert r.json() == [{"id": "local/model", "name": "Local Model"}]
-    assert http_get.call_args.args[0] == "http://192.168.0.19:4000/api/v1/models"
+    assert http_get.call_args.args[0] == "http://192.168.0.19:4000/v1/models"
 
 
 def test_routing_preferences_default_off(client):

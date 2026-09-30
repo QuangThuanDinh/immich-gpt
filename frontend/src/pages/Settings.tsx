@@ -322,12 +322,12 @@ function ProviderFormPanel({
             value={form.base_url}
             onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
             style={inputStyle}
-            placeholder={form.provider_name === "ollama" ? "http://localhost:11434" : "https://openrouter.ai"}
+            placeholder={form.provider_name === "ollama" ? "http://localhost:11434" : "https://openrouter.ai/api/v1"}
           />
           <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>
             {form.provider_name === "ollama"
               ? "Ollama is self-hosted and does not require an API key."
-              : "The backend appends /api/v1. Leave blank to use https://openrouter.ai."}
+              : "Enter the complete API base URL, such as http://localhost:4000/v1. Leave blank to use the hosted OpenRouter API."}
           </div>
         </div>
       )}

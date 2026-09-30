@@ -175,8 +175,8 @@ Provider definitions are stored per user in the database.
 - hosted aggregator for many model vendors
 - uses its own API key
 - uses `https://openrouter.ai/api/v1` by default
-- accepts an optional origin-only Base URL, such as `http://192.168.0.19:4000`;
-  the backend appends `/api/v1`
+- accepts an optional complete OpenAI-compatible API Base URL, used exactly as
+  entered, such as `http://192.168.0.19:4000/v1` for LiteLLM
 - private or local Base URLs require `ALLOW_PRIVATE_SERVICE_URLS=true`
 - can list available models after the provider is saved
 
