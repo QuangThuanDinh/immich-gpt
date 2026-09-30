@@ -177,17 +177,45 @@ def test_openrouter_rejects_base_url_with_query(monkeypatch):
         get_openrouter_api_base_url("http://192.168.0.19:4000/v1?tenant=one")
 
 
-def test_openrouter_retries_without_unsupported_temperature(monkeypatch):
+def test_hosted_openrouter_retries_without_unsupported_temperature():
+    public_address = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+    ]
+    success = MagicMock()
+    success.choices = [MagicMock(message=MagicMock(content='{"ok": true}'))]
+
+    with patch("app.services.url_validation.socket.getaddrinfo", return_value=public_address):
+        with patch("openai.OpenAI") as openai:
+            completion = openai.return_value.chat.completions.create
+            completion.side_effect = [
+                Exception("UnsupportedParamsError: model doesn't support temperature=0.2"),
+                success,
+            ]
+            provider = OpenRouterProvider(
+                "key",
+                model="gpt-5-mini-1",
+            )
+            result = provider.classify_routing(
+                [{"role": "user", "content": "Return JSON"}],
+            )
+
+    assert result == {"ok": True}
+    assert completion.call_count == 2
+    assert completion.call_args_list[0].kwargs["temperature"] == 0.2
+    assert "temperature" not in completion.call_args_list[1].kwargs
+    assert completion.call_args_list[1].kwargs["response_format"] == {
+        "type": "json_object"
+    }
+
+
+def test_custom_openrouter_omits_temperature(monkeypatch):
     monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
     success = MagicMock()
     success.choices = [MagicMock(message=MagicMock(content='{"ok": true}'))]
 
     with patch("openai.OpenAI") as openai:
         completion = openai.return_value.chat.completions.create
-        completion.side_effect = [
-            Exception("UnsupportedParamsError: model doesn't support temperature=0.2"),
-            success,
-        ]
+        completion.return_value = success
         provider = OpenRouterProvider(
             "key",
             model="gpt-5-mini-1",
@@ -198,12 +226,9 @@ def test_openrouter_retries_without_unsupported_temperature(monkeypatch):
         )
 
     assert result == {"ok": True}
-    assert completion.call_count == 2
-    assert completion.call_args_list[0].kwargs["temperature"] == 0.2
-    assert "temperature" not in completion.call_args_list[1].kwargs
-    assert completion.call_args_list[1].kwargs["response_format"] == {
-        "type": "json_object"
-    }
+    completion.assert_called_once()
+    assert "temperature" not in completion.call_args.kwargs
+    assert completion.call_args.kwargs["response_format"] == {"type": "json_object"}
 
 
 def test_build_provider_uses_defaults_for_blank_database_values(monkeypatch):

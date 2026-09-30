@@ -278,6 +278,7 @@ class OpenRouterProvider(AIProvider):
         self._api_key = api_key
         self._model = model
         self.base_url = get_openrouter_api_base_url(base_url)
+        self._is_hosted_openrouter = self.base_url == OPENROUTER_DEFAULT_API_BASE
         self._extra_headers = {
             "HTTP-Referer": "https://github.com/titatom/immich-gpt",
             "X-OpenRouter-Title": "immich-gpt",
@@ -298,7 +299,7 @@ class OpenRouterProvider(AIProvider):
             import httpx
             path = (
                 "key"
-                if self.base_url == OPENROUTER_DEFAULT_API_BASE
+                if self._is_hosted_openrouter
                 else "models"
             )
             r = httpx.get(
@@ -323,9 +324,10 @@ class OpenRouterProvider(AIProvider):
             "model": self._model,
             "messages": messages,
             "response_format": {"type": "json_object"},
-            "temperature": 0.2,
             "max_tokens": 1024,
         }
+        if self._is_hosted_openrouter:
+            request["temperature"] = 0.2
         for _ in range(3):
             try:
                 response = self._client.chat.completions.create(
