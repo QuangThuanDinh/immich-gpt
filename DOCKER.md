@@ -123,7 +123,7 @@ DATA_DIR=/mnt/user/appdata/immich-gpt   # Unraid default
 | `DATABASE_URL` | `sqlite:////data/immich_gpt.db` | SQLite database path |
 | `LOG_LEVEL` | `INFO` | Logging verbosity: DEBUG, INFO, WARNING, ERROR |
 | `APP_PORT` | `8000` | Host port (Compose only) |
-| `IMMICH_GPT_IMAGE` | `ghcr.io/quangthuandinh/immich-gpt:0.6.9` | Image tag used by `docker-compose.yml` |
+| `IMMICH_GPT_IMAGE` | `ghcr.io/quangthuandinh/immich-gpt:0.6.10` | Image tag used by `docker-compose.yml` |
 
 ### Internet-exposed deployments
 
