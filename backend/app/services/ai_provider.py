@@ -14,7 +14,7 @@ from .url_validation import ServiceUrlError, validate_service_url
 
 OPENROUTER_DEFAULT_ORIGIN = "https://openrouter.ai"
 OPENROUTER_DEFAULT_API_BASE = f"{OPENROUTER_DEFAULT_ORIGIN}/api/v1"
-OPENROUTER_MAX_TOKENS = 4096
+PROVIDER_MAX_TOKENS = 4096
 
 
 def get_openrouter_api_base_url(base_url: Optional[str] = None) -> str:
@@ -186,14 +186,40 @@ class OpenAIProvider(AIProvider):
         image_payload: Optional[dict] = None,
     ) -> Dict[str, Any]:
         messages = _inject_image(prompt_messages, image_payload, detail="low")
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,  # type: ignore
-            response_format={"type": "json_object"},
-            temperature=0.2,
-            max_tokens=1024,
-        )
-        raw = response.choices[0].message.content or "{}"
+        request: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+            "max_tokens": PROVIDER_MAX_TOKENS,
+        }
+        for _ in range(3):
+            try:
+                response = self._client.chat.completions.create(**request)
+                break
+            except Exception as e:
+                error = str(e).lower()
+                changed = False
+                if "max_tokens" in error and "max_completion_tokens" in error:
+                    request.pop("max_tokens", None)
+                    request["max_completion_tokens"] = PROVIDER_MAX_TOKENS
+                    changed = True
+                if "temperature" in error and (
+                    "unsupported" in error or "only the default" in error
+                ):
+                    changed = request.pop("temperature", None) is not None or changed
+                if not changed:
+                    raise
+        else:
+            raise RuntimeError("OpenAI request compatibility retries exhausted")
+
+        choice = response.choices[0]
+        raw = choice.message.content or ""
+        if not raw and choice.finish_reason == "length":
+            raise ValueError(
+                f"OpenAI response exhausted the {PROVIDER_MAX_TOKENS}-token "
+                "completion budget before returning content"
+            )
         return _parse_json_content(raw)
 
 
@@ -325,7 +351,7 @@ class OpenRouterProvider(AIProvider):
             "model": self._model,
             "messages": messages,
             "response_format": {"type": "json_object"},
-            "max_tokens": OPENROUTER_MAX_TOKENS,
+            "max_tokens": PROVIDER_MAX_TOKENS,
         }
         if self._is_hosted_openrouter:
             request["temperature"] = 0.2
@@ -353,7 +379,7 @@ class OpenRouterProvider(AIProvider):
         raw = choice.message.content or ""
         if not raw and choice.finish_reason == "length":
             raise ValueError(
-                f"OpenRouter response exhausted the {OPENROUTER_MAX_TOKENS}-token "
+                f"OpenRouter response exhausted the {PROVIDER_MAX_TOKENS}-token "
                 "completion budget before returning content"
             )
         return _parse_json_content(raw)

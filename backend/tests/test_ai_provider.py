@@ -114,6 +114,48 @@ def test_azure_openai_rejects_missing_api_key():
         )
 
 
+def test_azure_openai_retries_gpt5_compatible_parameters():
+    public_address = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+    ]
+    success = MagicMock()
+    success.choices = [
+        MagicMock(message=MagicMock(content='{"ok": true}'), finish_reason="stop")
+    ]
+
+    with patch("app.services.url_validation.socket.getaddrinfo", return_value=public_address):
+        with patch("openai.AzureOpenAI") as azure_openai:
+            completion = azure_openai.return_value.chat.completions.create
+            completion.side_effect = [
+                Exception(
+                    "Unsupported parameter: 'max_tokens'. "
+                    "Use 'max_completion_tokens' instead."
+                ),
+                Exception(
+                    "Unsupported value: 'temperature'. "
+                    "Only the default (1) value is supported."
+                ),
+                success,
+            ]
+            provider = OpenAIProvider(
+                "key",
+                base_url="https://resource.openai.azure.com/openai/v1",
+                azure_api_version="2024-02-15-preview",
+                azure_deployment="gpt-5-mini-1",
+            )
+            result = provider.classify_routing(
+                [{"role": "user", "content": "Return JSON"}],
+            )
+
+    assert result == {"ok": True}
+    assert completion.call_count == 3
+    assert completion.call_args_list[0].kwargs["max_tokens"] == 4096
+    assert completion.call_args_list[0].kwargs["temperature"] == 0.2
+    assert completion.call_args_list[1].kwargs["max_completion_tokens"] == 4096
+    assert "max_tokens" not in completion.call_args_list[1].kwargs
+    assert "temperature" not in completion.call_args_list[2].kwargs
+
+
 def test_openrouter_uses_default_api_base():
     public_address = [
         (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
