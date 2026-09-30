@@ -228,7 +228,29 @@ def test_custom_openrouter_omits_temperature(monkeypatch):
     assert result == {"ok": True}
     completion.assert_called_once()
     assert "temperature" not in completion.call_args.kwargs
+    assert completion.call_args.kwargs["max_tokens"] == 4096
     assert completion.call_args.kwargs["response_format"] == {"type": "json_object"}
+
+
+def test_openrouter_reports_empty_length_truncated_response(monkeypatch):
+    monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
+    truncated = MagicMock()
+    truncated.choices = [
+        MagicMock(message=MagicMock(content=""), finish_reason="length")
+    ]
+
+    with patch("openai.OpenAI") as openai:
+        openai.return_value.chat.completions.create.return_value = truncated
+        provider = OpenRouterProvider(
+            "key",
+            model="gpt-5-mini-1",
+            base_url="http://192.168.0.19:4000/v1",
+        )
+
+        with pytest.raises(ValueError, match="4096-token completion budget"):
+            provider.classify_routing(
+                [{"role": "user", "content": "Return JSON"}],
+            )
 
 
 def test_build_provider_uses_defaults_for_blank_database_values(monkeypatch):

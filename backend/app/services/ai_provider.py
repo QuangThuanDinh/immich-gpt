@@ -14,6 +14,7 @@ from .url_validation import ServiceUrlError, validate_service_url
 
 OPENROUTER_DEFAULT_ORIGIN = "https://openrouter.ai"
 OPENROUTER_DEFAULT_API_BASE = f"{OPENROUTER_DEFAULT_ORIGIN}/api/v1"
+OPENROUTER_MAX_TOKENS = 4096
 
 
 def get_openrouter_api_base_url(base_url: Optional[str] = None) -> str:
@@ -324,7 +325,7 @@ class OpenRouterProvider(AIProvider):
             "model": self._model,
             "messages": messages,
             "response_format": {"type": "json_object"},
-            "max_tokens": 1024,
+            "max_tokens": OPENROUTER_MAX_TOKENS,
         }
         if self._is_hosted_openrouter:
             request["temperature"] = 0.2
@@ -348,7 +349,13 @@ class OpenRouterProvider(AIProvider):
                     raise
         else:
             raise RuntimeError("OpenRouter request compatibility retries exhausted")
-        raw = response.choices[0].message.content or "{}"
+        choice = response.choices[0]
+        raw = choice.message.content or ""
+        if not raw and choice.finish_reason == "length":
+            raise ValueError(
+                f"OpenRouter response exhausted the {OPENROUTER_MAX_TOKENS}-token "
+                "completion budget before returning content"
+            )
         return _parse_json_content(raw)
 
 
