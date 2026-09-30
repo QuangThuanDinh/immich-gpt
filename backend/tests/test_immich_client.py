@@ -124,6 +124,33 @@ def test_list_album_assets_caches_full_album_payload():
     )
 
 
+def test_list_trashed_assets_uses_deleted_search_filter():
+    client = ImmichClient("http://immich.local", "key")
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.post.return_value = make_mock_response(
+        200,
+        {"assets": {"items": [{"id": "trashed-still"}]}},
+    )
+
+    with patch.object(client, "_client", return_value=mock_http):
+        result = client.list_trashed_assets(page=2, page_size=25)
+
+    assert result == [{"id": "trashed-still"}]
+    mock_http.post.assert_called_once_with(
+        "/api/search/metadata",
+        json={
+            "page": 2,
+            "size": 25,
+            "withExif": True,
+            "withArchived": True,
+            "withDeleted": True,
+            "trashedAfter": "1970-01-01T00:00:00.000Z",
+        },
+    )
+
+
 def test_is_external_library_asset_detection():
     client = ImmichClient("http://immich.local", "key")
     external_asset = {"library": {"type": "EXTERNAL"}}

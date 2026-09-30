@@ -52,6 +52,8 @@ class AssetSyncService:
             created_ids,
             updated_ids,
             job_progress_callback,
+            page_size,
+            should_stop,
         )
 
     def sync_favorites(
@@ -75,6 +77,8 @@ class AssetSyncService:
             created_ids,
             updated_ids,
             job_progress_callback,
+            page_size,
+            should_stop,
         )
 
     def sync_album(
@@ -99,6 +103,8 @@ class AssetSyncService:
             created_ids,
             updated_ids,
             job_progress_callback,
+            page_size,
+            should_stop,
         )
 
     def sync_albums(
@@ -154,6 +160,8 @@ class AssetSyncService:
             created_ids,
             updated_ids,
             job_progress_callback,
+            page_size,
+            should_stop,
         )
 
     def _finish_sync(
@@ -163,20 +171,77 @@ class AssetSyncService:
         created_ids: Set[str],
         updated_ids: Set[str],
         job_progress_callback=None,
+        page_size: int = 100,
+        should_stop: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, int]:
         filtered_ids: Set[str] = set()
         if completed:
-            filtered_ids = self._remove_live_photo_motion_assets()
-            if filtered_ids and job_progress_callback:
-                job_progress_callback(
-                    f"Filtered {len(filtered_ids)} linked Live Photo motion asset(s)"
+            try:
+                trashed_motion_ids, trash_lookup_completed = (
+                    self._collect_trashed_live_photo_motion_ids(
+                        page_size=page_size,
+                        should_stop=should_stop,
+                        job_progress_callback=job_progress_callback,
+                    )
                 )
+            except Exception as e:
+                result["errors"] += 1
+                trash_lookup_completed = False
+                if job_progress_callback:
+                    job_progress_callback(
+                        f"Error fetching trashed asset relationships: {e}"
+                    )
+
+            if trash_lookup_completed:
+                filtered_ids = self._remove_live_photo_motion_assets(
+                    trashed_motion_ids
+                )
+                if filtered_ids and job_progress_callback:
+                    job_progress_callback(
+                        f"Filtered {len(filtered_ids)} linked Live Photo motion asset(s)"
+                    )
 
         result["created"] -= len(filtered_ids & created_ids)
         result["updated"] -= len(filtered_ids & updated_ids)
         result["synced"] = result["created"] + result["updated"]
         result["filtered"] = len(filtered_ids)
         return result
+
+    def _collect_trashed_live_photo_motion_ids(
+        self,
+        page_size: int,
+        should_stop: Optional[Callable[[], bool]] = None,
+        job_progress_callback=None,
+    ) -> Tuple[Set[str], bool]:
+        motion_ids: Set[str] = set()
+        page = 1
+
+        while True:
+            if should_stop and should_stop():
+                if job_progress_callback:
+                    job_progress_callback("Sync stopped due to pause/cancel request.")
+                return set(), False
+
+            if job_progress_callback:
+                job_progress_callback(f"Fetching trashed asset relationships page {page}")
+            raw_assets = self.immich.list_trashed_assets(
+                page=page,
+                page_size=page_size,
+            )
+
+            if should_stop and should_stop():
+                if job_progress_callback:
+                    job_progress_callback("Sync stopped due to pause/cancel request.")
+                return set(), False
+
+            for raw in raw_assets:
+                motion_id = raw.get("livePhotoVideoId")
+                if motion_id:
+                    motion_ids.add(motion_id)
+
+            if len(raw_assets) < page_size:
+                return motion_ids, True
+            page += 1
 
     _COMMIT_BATCH_SIZE = 100
 
@@ -253,7 +318,10 @@ class AssetSyncService:
             updated_ids,
         )
 
-    def _remove_live_photo_motion_assets(self) -> Set[str]:
+    def _remove_live_photo_motion_assets(
+        self,
+        additional_motion_ids: Optional[Set[str]] = None,
+    ) -> Set[str]:
         query = self.db.query(Asset)
         if self.user_id:
             query = query.filter(Asset.user_id == self.user_id)
@@ -264,6 +332,10 @@ class AssetSyncService:
             if isinstance((metadata := asset.raw_metadata_json), dict)
             and metadata.get("livePhotoVideoId")
         }
+        motion_assets.update(
+            (self.user_id, motion_id)
+            for motion_id in (additional_motion_ids or set())
+        )
         if not motion_assets:
             return set()
 

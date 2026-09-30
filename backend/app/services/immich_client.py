@@ -86,6 +86,8 @@ class ImmichClient:
         asset_type: Optional[str] = None,
         is_favorite: Optional[bool] = None,
         is_archived: Optional[bool] = None,
+        with_deleted: Optional[bool] = None,
+        trashed_after: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List assets with pagination.
 
@@ -105,6 +107,10 @@ class ImmichClient:
             body["isFavorite"] = is_favorite
         if is_archived is not None:
             body["isArchived"] = is_archived
+        if with_deleted is not None:
+            body["withDeleted"] = with_deleted
+        if trashed_after is not None:
+            body["trashedAfter"] = trashed_after
 
         with self._client_context() as client:
             # Try POST /api/search/metadata (v1.106–v1.117)
@@ -121,6 +127,8 @@ class ImmichClient:
                     params["isFavorite"] = is_favorite
                 if is_archived is not None:
                     params["isArchived"] = is_archived
+                if with_deleted:
+                    params["isTrashed"] = True
                 r = client.get("/api/assets", params=params)
                 if r.status_code != 200:
                     raise ImmichError(f"Failed to list assets: {r.text}", r.status_code)
@@ -137,6 +145,19 @@ class ImmichClient:
                 items = data.get("items") or data.get("assets", {}).get("items", [])
                 return items if isinstance(items, list) else []
             return data if isinstance(data, list) else []
+
+    def list_trashed_assets(
+        self,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """List only trashed assets for relationship reconciliation."""
+        return self.list_assets(
+            page=page,
+            page_size=page_size,
+            with_deleted=True,
+            trashed_after="1970-01-01T00:00:00.000Z",
+        )
 
     def list_album_assets(
         self,

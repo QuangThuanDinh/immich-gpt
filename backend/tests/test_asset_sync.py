@@ -5,11 +5,17 @@ from tests.conftest import TEST_USER_ID
 
 
 class _PagedImmich:
-    def __init__(self, pages):
+    def __init__(self, pages, trashed_pages=None):
         self.pages = pages
+        self.trashed_pages = trashed_pages or {}
+        self.trashed_calls = []
 
     def list_assets(self, page=1, page_size=100, **kwargs):
         return self.pages.get(page, [])
+
+    def list_trashed_assets(self, page=1, page_size=100):
+        self.trashed_calls.append((page, page_size))
+        return self.trashed_pages.get(page, [])
 
     def is_external_library_asset(self, raw):
         return False
@@ -95,6 +101,108 @@ def test_sync_keeps_non_video_asset_referenced_as_motion(db):
     }
     assert remaining_ids == {"still", "referenced-image"}
     assert result["filtered"] == 0
+
+
+def test_sync_filters_motion_asset_referenced_by_trashed_still(db):
+    immich = _PagedImmich(
+        {
+            1: [
+                _raw_asset("motion", "VIDEO"),
+                _raw_asset("standalone-video", "VIDEO"),
+            ],
+        },
+        trashed_pages={
+            1: [
+                _raw_asset("unrelated-trash-1", "IMAGE", isTrashed=True),
+                _raw_asset("unrelated-trash-2", "IMAGE", isTrashed=True),
+            ],
+            2: [
+                _raw_asset(
+                    "trashed-still",
+                    "IMAGE",
+                    isTrashed=True,
+                    livePhotoVideoId="motion",
+                )
+            ],
+        },
+    )
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(page_size=2)
+
+    remaining_ids = {
+        asset.immich_id
+        for asset in db.query(Asset).filter(Asset.user_id == TEST_USER_ID)
+    }
+    assert remaining_ids == {"standalone-video"}
+    assert "trashed-still" not in remaining_ids
+    assert immich.trashed_calls == [(1, 2), (2, 2)]
+    assert result == {
+        "synced": 1,
+        "created": 1,
+        "updated": 0,
+        "filtered": 1,
+        "errors": 0,
+    }
+
+
+def test_sync_does_not_reconcile_after_trashed_asset_fetch_failure(db):
+    class _FailedTrashImmich(_PagedImmich):
+        def list_trashed_assets(self, page=1, page_size=100):
+            raise RuntimeError("trash fetch failed")
+
+    immich = _FailedTrashImmich({
+        1: [
+            _raw_asset("motion", "VIDEO"),
+            _raw_asset("still", "IMAGE", livePhotoVideoId="motion"),
+        ],
+    })
+    log_lines = []
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(
+        page_size=10,
+        job_progress_callback=log_lines.append,
+    )
+
+    remaining_ids = {
+        asset.immich_id
+        for asset in db.query(Asset).filter(Asset.user_id == TEST_USER_ID)
+    }
+    assert remaining_ids == {"motion", "still"}
+    assert result["filtered"] == 0
+    assert result["errors"] == 1
+    assert any(
+        line == "Error fetching trashed asset relationships: trash fetch failed"
+        for line in log_lines
+    )
+
+
+def test_sync_does_not_reconcile_when_stopped_during_trash_lookup(db):
+    immich = _PagedImmich(
+        {
+            1: [
+                _raw_asset("motion", "VIDEO"),
+                _raw_asset("still", "IMAGE", livePhotoVideoId="motion"),
+            ],
+        },
+        trashed_pages={1: []},
+    )
+    stop_checks = iter([False, False, True])
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(
+        page_size=10,
+        should_stop=lambda: next(stop_checks),
+    )
+
+    remaining_ids = {
+        asset.immich_id
+        for asset in db.query(Asset).filter(Asset.user_id == TEST_USER_ID)
+    }
+    assert remaining_ids == {"motion", "still"}
+    assert result["filtered"] == 0
+    assert result["errors"] == 0
 
 
 def test_sync_does_not_reconcile_after_interrupted_fetch(db):
@@ -191,6 +299,9 @@ def test_multiple_albums_reconcile_once_after_all_albums(db):
             }
             return assets[album_id] if page == 1 else []
 
+        def list_trashed_assets(self, page=1, page_size=100):
+            return []
+
         def is_external_library_asset(self, raw):
             return False
 
@@ -209,6 +320,38 @@ def test_multiple_albums_reconcile_once_after_all_albums(db):
         line for line in log_lines
         if line.startswith("Filtered ")
     ] == ["Filtered 1 linked Live Photo motion asset(s)"]
+
+
+def test_album_sync_filters_motion_referenced_by_trashed_still(db):
+    class _AlbumImmich:
+        def list_album_assets(self, album_id, page=1, page_size=100):
+            return [_raw_asset("motion", "VIDEO")] if page == 1 else []
+
+        def list_trashed_assets(self, page=1, page_size=100):
+            return [
+                _raw_asset(
+                    "trashed-still",
+                    "IMAGE",
+                    isTrashed=True,
+                    livePhotoVideoId="motion",
+                )
+            ]
+
+        def is_external_library_asset(self, raw):
+            return False
+
+    service = AssetSyncService(db, _AlbumImmich(), user_id=TEST_USER_ID)
+
+    result = service.sync_album("motion-album", page_size=10)
+
+    assert db.query(Asset).filter(Asset.user_id == TEST_USER_ID).count() == 0
+    assert result == {
+        "synced": 0,
+        "created": 0,
+        "updated": 0,
+        "filtered": 1,
+        "errors": 0,
+    }
 
 
 def test_live_photo_cleanup_is_scoped_to_current_user(db):
