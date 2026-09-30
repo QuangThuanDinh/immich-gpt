@@ -161,6 +161,12 @@ Provider definitions are stored per user in the database.
 - hosted provider
 - typically uses an API key
 - default model is `gpt-4o`
+- accepts an optional custom OpenAI-compatible Base URL, used exactly as entered
+- supports Azure OpenAI resource origins such as
+  `https://my-resource.openai.azure.com`:
+  - Base URL + Deployment uses `{Base URL}/openai/v1`
+  - adding API Version uses the versioned AzureOpenAI deployment API
+- Azure deployment replaces the Model value, and model-list verification is skipped
 
 #### OpenRouter
 

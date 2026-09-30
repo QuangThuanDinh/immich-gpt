@@ -212,6 +212,44 @@ def test_create_provider_encrypts_api_key(client, db):
     assert decrypt_secret(row.api_key_encrypted) == "sk-plain"
 
 
+def test_create_provider_saves_azure_configuration(client, db):
+    r = client.post(
+        "/api/settings/providers",
+        json={
+            "provider_name": "openai",
+            "enabled": True,
+            "api_key": "azure-key",
+            "base_url": "https://resource.openai.azure.com",
+            "azure_api_version": "2024-10-21",
+            "azure_deployment": "vision-deployment",
+        },
+    )
+
+    assert r.status_code == 200
+    assert r.json()["azure_api_version"] == "2024-10-21"
+    assert r.json()["azure_deployment"] == "vision-deployment"
+    row = db.query(ProviderConfig).filter(ProviderConfig.provider_name == "openai").first()
+    assert row.base_url == "https://resource.openai.azure.com"
+    assert row.extra_config_json == {
+        "azure_api_version": "2024-10-21",
+        "azure_deployment": "vision-deployment",
+    }
+
+
+def test_create_provider_rejects_incomplete_azure_configuration(client):
+    r = client.post(
+        "/api/settings/providers",
+        json={
+            "provider_name": "openai",
+            "base_url": "https://resource.openai.azure.com",
+            "azure_api_version": "2024-10-21",
+        },
+    )
+
+    assert r.status_code == 400
+    assert "Base URL and Deployment" in r.json()["detail"]
+
+
 def test_upsert_provider_updates_existing(client, db):
     _make_provider(db, "openai", enabled=False)
     payload = {
@@ -302,6 +340,29 @@ def test_test_provider_failure(client, db):
 
     assert r.status_code == 400
     assert "bad key" in r.json()["detail"]
+
+
+def test_test_provider_reports_skipped_azure_verification(client, db):
+    provider = _make_provider(
+        db,
+        "openai",
+        base_url="https://resource.openai.azure.com",
+    )
+    provider.extra_config_json = {
+        "azure_deployment": "vision-deployment",
+    }
+    db.commit()
+    mock_provider = MagicMock()
+    mock_provider.health_check.return_value = True
+    mock_provider.verification_skipped = True
+
+    with patch("app.services.ai_provider.build_provider", return_value=mock_provider) as build:
+        r = client.get("/api/settings/providers/openai/test")
+
+    assert r.status_code == 200
+    assert r.json()["verification_skipped"] is True
+    assert "model verification is skipped" in r.json()["message"]
+    assert build.call_args.args[1]["azure_deployment"] == "vision-deployment"
 
 
 def test_list_ollama_models_rejects_restricted_url(client, db, monkeypatch):

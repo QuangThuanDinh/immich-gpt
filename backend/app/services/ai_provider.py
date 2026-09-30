@@ -102,20 +102,61 @@ class OpenAIProvider(AIProvider):
         api_key: str,
         model: str = "gpt-4o",
         base_url: Optional[str] = None,
+        azure_api_version: Optional[str] = None,
+        azure_deployment: Optional[str] = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ):
-        from openai import OpenAI
-        kwargs: Dict[str, Any] = {"api_key": api_key, "timeout": timeout}
-        if base_url:
-            kwargs["base_url"] = validate_service_url(base_url, field_name="Provider base URL")
-        self._client = OpenAI(**kwargs)
-        self.model = model
+        self.verification_skipped = False
+        if azure_api_version or azure_deployment:
+            if not base_url or not azure_deployment:
+                raise ValueError(
+                    "Azure OpenAI requires Base URL and Deployment"
+                )
+            endpoint = validate_service_url(
+                base_url,
+                field_name="Azure OpenAI Base URL",
+            )
+            parsed = urlparse(endpoint)
+            if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+                raise ServiceUrlError(
+                    "Azure OpenAI Base URL must be a resource origin without a path, query, or fragment"
+                )
+            if azure_api_version:
+                from openai import AzureOpenAI
+                self._client = AzureOpenAI(
+                    api_key=api_key,
+                    azure_endpoint=endpoint.rstrip("/"),
+                    api_version=azure_api_version,
+                    azure_deployment=azure_deployment,
+                    timeout=timeout,
+                )
+            else:
+                from openai import OpenAI
+                self._client = OpenAI(
+                    api_key=api_key,
+                    base_url=f"{endpoint.rstrip('/')}/openai/v1",
+                    timeout=timeout,
+                )
+            self.model = azure_deployment
+            self.verification_skipped = True
+        else:
+            from openai import OpenAI
+            kwargs: Dict[str, Any] = {"api_key": api_key, "timeout": timeout}
+            if base_url:
+                kwargs["base_url"] = validate_service_url(
+                    base_url,
+                    field_name="Provider base URL",
+                )
+            self._client = OpenAI(**kwargs)
+            self.model = model
 
     @property
     def provider_name(self) -> str:
         return "openai"
 
     def health_check(self) -> bool:
+        if self.verification_skipped:
+            return True
         try:
             self._client.models.list()
             return True
@@ -294,6 +335,8 @@ def build_provider(provider_name: str, config: dict) -> AIProvider:
             api_key=config["api_key"],
             model=config.get("model_name", "gpt-4o"),
             base_url=config.get("base_url"),
+            azure_api_version=config.get("azure_api_version"),
+            azure_deployment=config.get("azure_deployment"),
             timeout=float(config.get("timeout", OpenAIProvider.DEFAULT_TIMEOUT_SECONDS)),
         )
     elif provider_name == "ollama":

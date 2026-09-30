@@ -26,6 +26,8 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 _KEY_IMMICH_URL = "immich_url"
 _KEY_IMMICH_API_KEY = "immich_api_key"
 _KEY_LEARN_FROM_CORRECTIONS = "routing_learn_from_corrections"
+_AZURE_API_VERSION = "azure_api_version"
+_AZURE_DEPLOYMENT = "azure_deployment"
 
 
 def _get_setting(db: Session, user_id: str, key: str) -> Optional[str]:
@@ -59,6 +61,39 @@ def _get_immich_credentials(db: Session, user_id: str):
     url = _get_setting(db, user_id, _KEY_IMMICH_URL) or settings.IMMICH_URL
     api_key = _get_secret_setting(db, user_id, _KEY_IMMICH_API_KEY) or settings.IMMICH_API_KEY
     return url, api_key
+
+
+def _provider_extra_config(
+    body: ProviderConfigCreate,
+    existing: Optional[ProviderConfig],
+) -> Optional[dict]:
+    current = existing.extra_config_json if existing else None
+    config = dict(body.extra_config if body.extra_config is not None else current or {})
+    azure_fields_supplied = bool(
+        {_AZURE_API_VERSION, _AZURE_DEPLOYMENT} & body.model_fields_set
+    )
+
+    if azure_fields_supplied:
+        api_version = (body.azure_api_version or "").strip()
+        deployment = (body.azure_deployment or "").strip()
+        config.pop(_AZURE_API_VERSION, None)
+        config.pop(_AZURE_DEPLOYMENT, None)
+        if api_version or deployment:
+            if body.provider_name != "openai":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Azure configuration is supported only for the OpenAI provider",
+                )
+            if not body.base_url or not deployment:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Azure OpenAI requires Base URL and Deployment",
+                )
+            if api_version:
+                config[_AZURE_API_VERSION] = api_version
+            config[_AZURE_DEPLOYMENT] = deployment
+
+    return config or None
 
 
 @router.get("/immich", response_model=ImmichSettingsOut)
@@ -139,6 +174,7 @@ def upsert_provider(
         ProviderConfig.user_id == current_user.id,
         ProviderConfig.provider_name == body.provider_name,
     ).first()
+    extra_config = _provider_extra_config(body, existing)
 
     if body.is_default:
         db.query(ProviderConfig).filter(
@@ -154,8 +190,11 @@ def upsert_provider(
             existing.base_url = body.base_url
         if body.model_name is not None:
             existing.model_name = body.model_name
-        if body.extra_config is not None:
-            existing.extra_config_json = body.extra_config
+        if body.extra_config is not None or {
+            _AZURE_API_VERSION,
+            _AZURE_DEPLOYMENT,
+        } & body.model_fields_set:
+            existing.extra_config_json = extra_config
         db.commit()
         db.refresh(existing)
         return _provider_to_out(existing)
@@ -169,7 +208,7 @@ def upsert_provider(
             api_key_encrypted=encrypt_secret(body.api_key),
             base_url=body.base_url,
             model_name=body.model_name,
-            extra_config_json=body.extra_config,
+            extra_config_json=extra_config,
         )
         db.add(row)
         db.commit()
@@ -208,14 +247,23 @@ def test_provider(
     if not row:
         raise HTTPException(status_code=404, detail="Provider not found")
     try:
-        p = build_provider(provider_name, {
+        config = {
             "api_key": decrypt_secret(row.api_key_encrypted) or "",
             "model_name": row.model_name,
             "base_url": row.base_url,
-        })
+        }
+        if row.extra_config_json:
+            config.update(row.extra_config_json)
+        p = build_provider(provider_name, config)
         ok = p.health_check()
         if not ok:
             return {"connected": False, "error": "Provider unreachable or invalid API key"}
+        if getattr(p, "verification_skipped", False):
+            return {
+                "connected": True,
+                "verification_skipped": True,
+                "message": "Azure configuration is valid; model verification is skipped",
+            }
         return {"connected": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -295,6 +343,7 @@ def save_routing_preferences(
 
 
 def _provider_to_out(row: ProviderConfig) -> ProviderConfigOut:
+    extra_config = row.extra_config_json or {}
     return ProviderConfigOut(
         id=row.id,
         provider_name=row.provider_name,
@@ -302,6 +351,8 @@ def _provider_to_out(row: ProviderConfig) -> ProviderConfigOut:
         is_default=row.is_default,
         base_url=row.base_url,
         model_name=row.model_name,
+        azure_api_version=extra_config.get(_AZURE_API_VERSION),
+        azure_deployment=extra_config.get(_AZURE_DEPLOYMENT),
         has_api_key=has_secret(row.api_key_encrypted),
         created_at=row.created_at,
         updated_at=row.updated_at,

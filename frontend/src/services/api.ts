@@ -123,6 +123,8 @@ export const upsertProvider = (data: {
   api_key?: string;
   base_url?: string;
   model_name?: string;
+  azure_api_version?: string;
+  azure_deployment?: string;
 }) => api.post("/settings/providers", data).then((r) => r.data);
 
 export const deleteProvider = (name: string) =>

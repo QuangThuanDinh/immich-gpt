@@ -10,6 +10,8 @@ class ProviderConfigCreate(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model_name: Optional[str] = None
+    azure_api_version: Optional[str] = None
+    azure_deployment: Optional[str] = None
     extra_config: Optional[Dict[str, Any]] = None
 
 
@@ -19,6 +21,8 @@ class ProviderConfigUpdate(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model_name: Optional[str] = None
+    azure_api_version: Optional[str] = None
+    azure_deployment: Optional[str] = None
     extra_config: Optional[Dict[str, Any]] = None
 
 
@@ -29,6 +33,8 @@ class ProviderConfigOut(BaseModel):
     is_default: bool
     base_url: Optional[str]
     model_name: Optional[str]
+    azure_api_version: Optional[str]
+    azure_deployment: Optional[str]
     has_api_key: bool
     created_at: datetime
     updated_at: datetime

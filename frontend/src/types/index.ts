@@ -44,6 +44,8 @@ export interface ProviderConfig {
   is_default: boolean;
   base_url?: string;
   model_name?: string;
+  azure_api_version?: string;
+  azure_deployment?: string;
   has_api_key: boolean;
   created_at: string;
   updated_at: string;

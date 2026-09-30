@@ -59,4 +59,24 @@ describe("Settings page", () => {
     expect(screen.getByPlaceholderText("https://openrouter.ai")).toBeInTheDocument();
     expect(screen.getByText(/backend appends \/api\/v1/i)).toBeInTheDocument();
   });
+
+  it("supports standard and Azure OpenAI configuration", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Add Provider/i }));
+
+    expect(screen.getByPlaceholderText("https://api.openai.com/v1")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("2024-10-21")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("my-gpt-4o-deployment")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("https://api.openai.com/v1"), {
+      target: { value: "https://resource.openai.azure.com" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("my-gpt-4o-deployment"), {
+      target: { value: "vision-deployment" },
+    });
+
+    expect(screen.getByText(/uses \{Base URL\}\/openai\/v1/i)).toBeInTheDocument();
+    expect(screen.getByText("Uses Azure deployment")).toBeInTheDocument();
+  });
 });

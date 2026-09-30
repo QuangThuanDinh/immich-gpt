@@ -26,6 +26,65 @@ def test_build_provider_allows_openai_timeout_override():
     openai.assert_called_once_with(api_key="key", timeout=45)
 
 
+def test_openai_provider_uses_custom_base_url():
+    public_address = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+    ]
+
+    with patch("app.services.url_validation.socket.getaddrinfo", return_value=public_address):
+        with patch("openai.OpenAI") as openai:
+            OpenAIProvider("key", base_url="https://gateway.example.com/v1")
+
+    assert openai.call_args.kwargs["base_url"] == "https://gateway.example.com/v1"
+
+
+def test_azure_openai_v1_appends_api_base_and_uses_deployment():
+    public_address = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+    ]
+
+    with patch("app.services.url_validation.socket.getaddrinfo", return_value=public_address):
+        with patch("openai.OpenAI") as openai:
+            provider = OpenAIProvider(
+                "key",
+                base_url="https://resource.openai.azure.com",
+                azure_deployment="vision-deployment",
+            )
+
+    assert openai.call_args.kwargs["base_url"] == (
+        "https://resource.openai.azure.com/openai/v1"
+    )
+    assert provider.model == "vision-deployment"
+    assert provider.verification_skipped is True
+    assert provider.health_check() is True
+    openai.return_value.models.list.assert_not_called()
+
+
+def test_versioned_azure_openai_uses_azure_client():
+    public_address = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+    ]
+
+    with patch("app.services.url_validation.socket.getaddrinfo", return_value=public_address):
+        with patch("openai.AzureOpenAI") as azure_openai:
+            provider = OpenAIProvider(
+                "key",
+                base_url="https://resource.openai.azure.com/",
+                azure_api_version="2024-10-21",
+                azure_deployment="vision-deployment",
+            )
+
+    azure_openai.assert_called_once_with(
+        api_key="key",
+        azure_endpoint="https://resource.openai.azure.com",
+        api_version="2024-10-21",
+        azure_deployment="vision-deployment",
+        timeout=120,
+    )
+    assert provider.model == "vision-deployment"
+    assert provider.verification_skipped is True
+
+
 def test_openrouter_uses_default_api_base():
     public_address = [
         (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))

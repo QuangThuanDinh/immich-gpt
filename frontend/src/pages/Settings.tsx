@@ -40,6 +40,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 interface TestResult {
   connected?: boolean;
+  verification_skipped?: boolean;
+  message?: string;
   asset_count?: number;
   error?: string;
 }
@@ -126,6 +128,8 @@ interface ProviderForm {
   api_key: string;
   model_name: string;
   base_url: string;
+  azure_api_version: string;
+  azure_deployment: string;
   enabled: boolean;
   is_default: boolean;
 }
@@ -141,6 +145,9 @@ function ModelPickerForm({
   inputStyle: React.CSSProperties;
   isEditing?: boolean;
 }) {
+  const usesAzureDeployment =
+    form.provider_name === "openai" &&
+    Boolean(form.azure_api_version || form.azure_deployment);
   const { data: models } = useQuery({
     queryKey: ["provider-models", form.provider_name, form.base_url],
     queryFn: () => getProviderModels(form.provider_name),
@@ -169,7 +176,15 @@ function ModelPickerForm({
             onChange={(e) => {
               const p = e.target.value;
               const defaultModel = p === "ollama" ? "llava" : p === "openrouter" ? "openai/gpt-4o" : "gpt-4o";
-              setForm((f) => ({ ...f, provider_name: p, model_name: defaultModel, api_key: "", base_url: "" }));
+              setForm((f) => ({
+                ...f,
+                provider_name: p,
+                model_name: defaultModel,
+                api_key: "",
+                base_url: "",
+                azure_api_version: "",
+                azure_deployment: "",
+              }));
             }}
             style={_inputStyle}
           >
@@ -181,7 +196,11 @@ function ModelPickerForm({
       </div>
       <div>
         <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>Model</label>
-        {models && models.length > 0 ? (
+        {usesAzureDeployment ? (
+          <div style={{ ..._inputStyle, color: "#64748b" }}>
+            Uses Azure deployment
+          </div>
+        ) : models && models.length > 0 ? (
           <select value={form.model_name} onChange={(e) => setForm((f) => ({ ...f, model_name: e.target.value }))} style={_inputStyle}>
             {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
@@ -203,6 +222,8 @@ const EMPTY_FORM: ProviderForm = {
   api_key: "",
   model_name: "gpt-4o",
   base_url: "",
+  azure_api_version: "",
+  azure_deployment: "",
   enabled: true,
   is_default: true,
 };
@@ -222,6 +243,12 @@ function ProviderFormPanel({
   onSave: () => void;
   onCancel: () => void;
 }) {
+  const azureFieldsStarted = Boolean(form.azure_api_version || form.azure_deployment);
+  const azureConfigIncomplete =
+    form.provider_name === "openai" &&
+    azureFieldsStarted &&
+    !(form.base_url && form.azure_deployment);
+
   return (
     <div style={{ marginTop: 20 }}>
       <ModelPickerForm form={form} setForm={setForm} inputStyle={inputStyle} isEditing={isEditing} />
@@ -236,6 +263,53 @@ function ProviderFormPanel({
             style={inputStyle}
             placeholder={isEditing ? "Leave blank to keep existing key" : form.provider_name === "openrouter" ? "sk-or-..." : "sk-..."}
           />
+        </div>
+      )}
+
+      {form.provider_name === "openai" && (
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>
+            Base URL (optional)
+          </label>
+          <input
+            value={form.base_url}
+            onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
+            style={inputStyle}
+            placeholder="https://api.openai.com/v1"
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>
+                Azure API Version (optional)
+              </label>
+              <input
+                value={form.azure_api_version}
+                onChange={(e) => setForm((f) => ({ ...f, azure_api_version: e.target.value }))}
+                style={inputStyle}
+                placeholder="2024-10-21"
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>
+                Azure Deployment (optional)
+              </label>
+              <input
+                value={form.azure_deployment}
+                onChange={(e) => setForm((f) => ({ ...f, azure_deployment: e.target.value }))}
+                style={inputStyle}
+                placeholder="my-gpt-4o-deployment"
+              />
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: azureConfigIncomplete ? "#fca5a5" : "#475569", marginTop: 6 }}>
+            {azureConfigIncomplete
+              ? "Azure OpenAI requires Base URL and Deployment."
+              : form.azure_deployment && form.azure_api_version
+                ? "Uses the versioned AzureOpenAI deployment API. Model verification is skipped."
+                : form.azure_deployment
+                  ? "Uses {Base URL}/openai/v1. Deployment replaces Model, and model verification is skipped."
+                  : "Leave Azure fields blank for standard OpenAI. Enter Deployment to use Azure /openai/v1; also enter API Version for the versioned API."}
+          </div>
         </div>
       )}
 
@@ -282,7 +356,7 @@ function ProviderFormPanel({
       <div style={{ display: "flex", gap: 8 }}>
         <button
           onClick={onSave}
-          disabled={isPending}
+          disabled={isPending || azureConfigIncomplete}
           style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#1e40af", color: "white", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
         >
           {isPending ? "Saving..." : isEditing ? "Update Provider" : "Save Provider"}
@@ -316,6 +390,8 @@ function ProvidersSection() {
       api_key: "",
       model_name: p.model_name || "",
       base_url: p.base_url || "",
+      azure_api_version: p.azure_api_version || "",
+      azure_deployment: p.azure_deployment || "",
       enabled: p.enabled,
       is_default: p.is_default,
     });
@@ -377,14 +453,17 @@ function ProvidersSection() {
               )}
             </div>
             <div style={{ fontSize: 12, color: "#64748b" }}>
-              {p.model_name}
+              {p.azure_deployment || p.model_name}
+              {p.azure_api_version && ` — API ${p.azure_api_version}`}
               {p.base_url && ` — ${p.base_url}`}
               {p.has_api_key && " — API key set"}
             </div>
             {testResults[p.provider_name] && (
               <div style={{ fontSize: 12, color: testResults[p.provider_name].connected ? "#86efac" : "#fca5a5" }}>
                 {testResults[p.provider_name].connected
-                  ? "✓ Connected"
+                  ? testResults[p.provider_name].verification_skipped
+                    ? `✓ ${testResults[p.provider_name].message || "Configuration valid; model verification skipped"}`
+                    : "✓ Connected"
                   : `✗ ${testResults[p.provider_name].error || "Connection failed"}`}
               </div>
             )}
