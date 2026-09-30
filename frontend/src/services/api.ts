@@ -11,6 +11,7 @@ import type {
   RoutingExample,
   RoutingPlan,
   RoutingPlanItem,
+  RoutingPlanItemUpdate,
   RoutingPlanSummary,
 } from "../types";
 
@@ -267,9 +268,23 @@ export const getRoutingPlanSummary = (planId: string): Promise<RoutingPlanSummar
 
 export const getRoutingPlanItems = (
   planId: string,
-  params?: { status?: string; bucket_id?: string }
+  params?: {
+    status?: string;
+    bucket_id?: string;
+    group_key?: string;
+    path?: string;
+    page?: number;
+    page_size?: number;
+  }
 ): Promise<RoutingPlanItem[]> =>
   api.get(`/routing/plans/${planId}/items`, { params }).then((r) => r.data);
+
+export const updateRoutingPlanItem = (
+  planId: string,
+  itemId: string,
+  data: RoutingPlanItemUpdate
+): Promise<RoutingPlanItem> =>
+  api.patch(`/routing/plans/${planId}/items/${itemId}`, data).then((r) => r.data);
 
 export const approveRoutingPlanItems = (
   planId: string,

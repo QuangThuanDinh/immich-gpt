@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -19,7 +19,7 @@ from ..schemas.bucket import (
     RoutingExampleCreate, RoutingExampleOut,
     RoutingPlanOut, RoutingPlanItemOut,
     RoutingClassifyRequest,
-    PlanItemMoveRequest, PlanItemActionRequest,
+    PlanItemMoveRequest, PlanItemActionRequest, PlanItemUpdateRequest,
     PromptPreviewOut,
 )
 from ..services.routing_tree import RoutingTreeService, RoutingTreeError
@@ -332,6 +332,10 @@ def plan_items(
     plan_id: str,
     status: Optional[str] = None,
     bucket_id: Optional[str] = None,
+    group_key: Optional[str] = None,
+    path: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user=Depends(require_active_user),
 ):
@@ -339,8 +343,43 @@ def plan_items(
     plan = svc.get_plan(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    items = svc.list_items(plan_id, status=status, bucket_id=bucket_id)
+    if group_key:
+        items = svc.list_group_items(
+            plan_id,
+            group_key,
+            page=page,
+            page_size=page_size,
+            bucket_id=bucket_id,
+            path=path,
+        )
+    else:
+        items = svc.list_items(plan_id, status=status, bucket_id=bucket_id)
     return [_plan_item_to_out(item) for item in items]
+
+
+@router.patch(
+    "/plans/{plan_id}/items/{item_id}",
+    response_model=RoutingPlanItemOut,
+)
+def update_plan_item(
+    plan_id: str,
+    item_id: str,
+    body: PlanItemUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    svc = RoutingPlanService(db, current_user.id)
+    try:
+        item = svc.update_item(
+            plan_id,
+            item_id,
+            body.model_dump(exclude_unset=True),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if message == "Routing plan item not found" else 400
+        raise HTTPException(status_code=status_code, detail=message)
+    return _plan_item_to_out(item)
 
 
 def _plan_item_to_out(item: RoutingPlanItem) -> RoutingPlanItemOut:
@@ -402,7 +441,11 @@ def plan_reject(
         raise HTTPException(status_code=404, detail="Plan not found")
     item_ids = body.item_ids or []
     if body.bucket_id:
-        items = svc.list_items(plan_id, bucket_id=body.bucket_id)
+        items = svc.list_items(
+            plan_id,
+            status="pending",
+            bucket_id=body.bucket_id,
+        )
         item_ids = list(set(item_ids) | {i.id for i in items})
     if not item_ids:
         items = svc.list_items(plan_id, status="pending")

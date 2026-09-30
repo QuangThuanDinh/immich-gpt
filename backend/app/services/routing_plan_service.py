@@ -130,6 +130,24 @@ class RoutingPlanService:
             q = q.filter(RoutingPlanItem.primary_bucket_id == bucket_id)
         return q.order_by(RoutingPlanItem.created_at.asc()).all()
 
+    def list_group_items(
+        self,
+        plan_id: str,
+        group_key: str,
+        page: int = 1,
+        page_size: int = 100,
+        bucket_id: Optional[str] = None,
+        path: Optional[str] = None,
+    ) -> List[RoutingPlanItem]:
+        items = self.list_items(plan_id, bucket_id=bucket_id)
+        matching = [
+            item for item in items
+            if self._classify_group(item) == group_key
+            and (bucket_id is not None or item.primary_bucket_path == path)
+        ]
+        start = (page - 1) * page_size
+        return matching[start:start + page_size]
+
     def get_item(self, item_id: str) -> Optional[RoutingPlanItem]:
         return (
             self.db.query(RoutingPlanItem)
@@ -173,10 +191,52 @@ class RoutingPlanService:
         return {
             "plan_id": plan_id,
             "total": total,
+            "writeback": self._writeback_summary(items),
             "groups": {
                 k: list(v.values()) for k, v in groups.items()
             },
         }
+
+    def _writeback_summary(
+        self,
+        items: List[RoutingPlanItem],
+    ) -> Dict[str, int]:
+        bucket_ids = {
+            item.primary_bucket_id
+            for item in items
+            if item.primary_bucket_id
+        }
+        buckets = {}
+        if bucket_ids:
+            buckets = {
+                bucket.id: bucket
+                for bucket in self.db.query(Bucket).filter(
+                    Bucket.user_id == self.user_id,
+                    Bucket.id.in_(bucket_ids),
+                ).all()
+            }
+
+        summary = {
+            "write_description": 0,
+            "write_tags": 0,
+            "move_to_album": 0,
+            "move_to_trash": 0,
+        }
+        for item in items:
+            if item.status in ("rejected", "failed"):
+                continue
+            bucket = buckets.get(item.primary_bucket_id)
+            if not bucket:
+                continue
+            if bucket.write_description:
+                summary["write_description"] += 1
+            if bucket.write_tags:
+                summary["write_tags"] += 1
+            if bucket.destination_type == "immich_album":
+                summary["move_to_album"] += 1
+            elif bucket.destination_type == "immich_trash":
+                summary["move_to_trash"] += 1
+        return summary
 
     def _classify_group(self, item: RoutingPlanItem) -> str:
         if item.status == "applied":
@@ -209,11 +269,70 @@ class RoutingPlanService:
         items = self._items_by_ids(item_ids, plan_id=plan_id)
         count = 0
         for item in items:
-            if item.status not in ("applied", "failed"):
+            if item.status == "pending":
                 item.status = "rejected"
                 count += 1
         self.db.commit()
         return count
+
+    def update_item(
+        self,
+        plan_id: str,
+        item_id: str,
+        updates: Dict[str, Any],
+    ) -> RoutingPlanItem:
+        item = (
+            self.db.query(RoutingPlanItem)
+            .filter(
+                RoutingPlanItem.user_id == self.user_id,
+                RoutingPlanItem.plan_id == plan_id,
+                RoutingPlanItem.id == item_id,
+            )
+            .first()
+        )
+        if not item:
+            raise ValueError("Routing plan item not found")
+        if item.status != "pending":
+            raise ValueError("Only pending routing plan items can be edited")
+
+        if "primary_bucket_id" in updates:
+            bucket_id = updates.pop("primary_bucket_id")
+            if bucket_id is None:
+                item.primary_bucket_id = None
+                item.primary_bucket_path = None
+                item.disposition = "review"
+            else:
+                target = self.db.query(Bucket).filter(
+                    Bucket.id == bucket_id,
+                    Bucket.user_id == self.user_id,
+                    Bucket.is_leaf.is_(True),
+                    Bucket.enabled.is_(True),
+                ).first()
+                if not target:
+                    raise ValueError(
+                        "Target routing destination not found or unavailable"
+                    )
+                item.primary_bucket_id = target.id
+                item.primary_bucket_path = target.path or target.name
+                item.disposition = (
+                    "trash_candidate"
+                    if target.destination_type == "immich_trash"
+                    else "keep"
+                )
+
+        column_names = {
+            "suggested_description": "suggested_description",
+            "suggested_tags": "suggested_tags_json",
+            "suggested_location": "suggested_location_json",
+            "suggested_caption": "suggested_caption",
+        }
+        for field, column_name in column_names.items():
+            if field in updates:
+                setattr(item, column_name, updates[field])
+
+        self.db.commit()
+        self.db.refresh(item)
+        return item
 
     def move_items(
         self,

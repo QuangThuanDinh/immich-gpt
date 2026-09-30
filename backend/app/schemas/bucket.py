@@ -234,6 +234,14 @@ class PlanItemActionRequest(BaseModel):
     disposition: Optional[str] = None
 
 
+class PlanItemUpdateRequest(BaseModel):
+    suggested_description: Optional[str] = None
+    suggested_tags: Optional[List[str]] = None
+    suggested_location: Optional[Dict[str, Any]] = None
+    suggested_caption: Optional[str] = None
+    primary_bucket_id: Optional[str] = None
+
+
 class PromptPreviewOut(BaseModel):
     bucket_id: str
     path: str

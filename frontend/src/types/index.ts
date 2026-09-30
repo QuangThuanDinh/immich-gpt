@@ -180,6 +180,14 @@ export interface RoutingPlanItem {
   error_message?: string | null;
 }
 
+export interface RoutingPlanItemUpdate {
+  suggested_description?: string | null;
+  suggested_tags?: string[];
+  suggested_location?: Record<string, unknown> | null;
+  suggested_caption?: string | null;
+  primary_bucket_id?: string | null;
+}
+
 export interface RoutingPlanGroupItem {
   path: string;
   bucket_id?: string | null;
@@ -190,6 +198,12 @@ export interface RoutingPlanGroupItem {
 export interface RoutingPlanSummary {
   plan_id: string;
   total: number;
+  writeback?: {
+    write_description: number;
+    write_tags: number;
+    move_to_album: number;
+    move_to_trash: number;
+  };
   groups: {
     auto_applied: RoutingPlanGroupItem[];
     ready_to_approve: RoutingPlanGroupItem[];

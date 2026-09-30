@@ -121,6 +121,46 @@ def test_plan_groups_items_by_destination(db):
     assert needs.get("B") == 2
 
 
+def test_plan_summary_lists_enabled_writeback_operations(db):
+    _clean(db)
+    tree = RoutingTreeService(db, TEST_USER_ID)
+    album = tree.create_node(RoutingNodeCreate(
+        name="Album",
+        destination_type="immich_album",
+        write_description=True,
+        write_tags=False,
+    ))
+    trash = tree.create_node(RoutingNodeCreate(
+        name="Trash",
+        destination_type="immich_trash",
+        write_description=False,
+        write_tags=True,
+    ))
+    plan_svc = RoutingPlanService(db, TEST_USER_ID)
+    plan = plan_svc.create_plan()
+    plan_svc.add_item(
+        plan,
+        asset_id="album-asset",
+        decision=_make_decision(album.id, "Album"),
+        ai_metadata={},
+    )
+    plan_svc.add_item(
+        plan,
+        asset_id="trash-asset",
+        decision=_make_decision(trash.id, "Trash"),
+        ai_metadata={},
+    )
+
+    summary = plan_svc.summarize(plan.id)
+
+    assert summary["writeback"] == {
+        "write_description": 1,
+        "write_tags": 1,
+        "move_to_album": 1,
+        "move_to_trash": 1,
+    }
+
+
 def test_approve_and_reject_groups(db):
     _clean(db)
     svc = RoutingTreeService(db, TEST_USER_ID)
@@ -144,6 +184,171 @@ def test_approve_and_reject_groups(db):
     db.refresh(items[0]); db.refresh(items[2])
     assert items[0].status == "approved"
     assert items[2].status == "rejected"
+
+
+def test_reject_does_not_overwrite_reviewed_items(db):
+    _clean(db)
+    tree = RoutingTreeService(db, TEST_USER_ID)
+    bucket = tree.create_node(RoutingNodeCreate(name="A"))
+    plan_svc = RoutingPlanService(db, TEST_USER_ID)
+    plan = plan_svc.create_plan()
+    approved = plan_svc.add_item(
+        plan,
+        asset_id="approved-asset",
+        decision=_make_decision(bucket.id, "A", review=True),
+        ai_metadata={},
+    )
+    rejected = plan_svc.add_item(
+        plan,
+        asset_id="rejected-asset",
+        decision=_make_decision(bucket.id, "A", review=True),
+        ai_metadata={},
+    )
+    plan_svc.approve_items([approved.id])
+    plan_svc.reject_items([rejected.id])
+
+    assert plan_svc.reject_items([approved.id, rejected.id]) == 0
+    db.refresh(approved)
+    db.refresh(rejected)
+    assert approved.status == "approved"
+    assert rejected.status == "rejected"
+
+
+def test_group_item_pagination_returns_exact_group(db):
+    _clean(db)
+    tree = RoutingTreeService(db, TEST_USER_ID)
+    bucket = tree.create_node(RoutingNodeCreate(name="A"))
+    plan_svc = RoutingPlanService(db, TEST_USER_ID)
+    plan = plan_svc.create_plan()
+    for index in range(3):
+        item = plan_svc.add_item(
+            plan,
+            asset_id=f"asset-{index}",
+            decision=_make_decision(bucket.id, "A", review=True),
+            ai_metadata={},
+        )
+        if index == 2:
+            plan_svc.reject_items([item.id])
+
+    first_page = plan_svc.list_group_items(
+        plan.id,
+        "needs_review",
+        page=1,
+        page_size=1,
+        bucket_id=bucket.id,
+    )
+    second_page = plan_svc.list_group_items(
+        plan.id,
+        "needs_review",
+        page=2,
+        page_size=1,
+        bucket_id=bucket.id,
+    )
+    rejected = plan_svc.list_group_items(
+        plan.id,
+        "rejected",
+        bucket_id=bucket.id,
+    )
+
+    assert len(first_page) == 1
+    assert len(second_page) == 1
+    assert first_page[0].id != second_page[0].id
+    assert [item.asset_id for item in rejected] == ["asset-2"]
+
+
+def test_group_item_pagination_endpoint(client, db):
+    _clean(db)
+    tree = RoutingTreeService(db, TEST_USER_ID)
+    bucket = tree.create_node(RoutingNodeCreate(name="A"))
+    plan_svc = RoutingPlanService(db, TEST_USER_ID)
+    plan = plan_svc.create_plan()
+    for index in range(2):
+        plan_svc.add_item(
+            plan,
+            asset_id=f"endpoint-asset-{index}",
+            decision=_make_decision(bucket.id, "A", review=True),
+            ai_metadata={},
+        )
+
+    response = client.get(
+        f"/api/routing/plans/{plan.id}/items",
+        params={
+            "group_key": "needs_review",
+            "bucket_id": bucket.id,
+            "page": 2,
+            "page_size": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["asset_id"] == "endpoint-asset-1"
+
+
+def test_update_plan_item_persists_suggestions_and_locks_after_review(client, db):
+    _clean(db)
+    tree = RoutingTreeService(db, TEST_USER_ID)
+    source = tree.create_node(RoutingNodeCreate(name="Source"))
+    target = tree.create_node(RoutingNodeCreate(name="Target"))
+    plan_svc = RoutingPlanService(db, TEST_USER_ID)
+    plan = plan_svc.create_plan()
+    item = plan_svc.add_item(
+        plan,
+        asset_id="editable-asset",
+        decision=_make_decision(source.id, "Source", review=True),
+        ai_metadata={},
+    )
+
+    response = client.patch(
+        f"/api/routing/plans/{plan.id}/items/{item.id}",
+        json={
+            "suggested_description": "Updated description",
+            "suggested_tags": ["family", "portrait"],
+            "suggested_location": {"place_name": "Hanoi"},
+            "suggested_caption": "Updated caption",
+            "primary_bucket_id": target.id,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["suggested_description"] == "Updated description"
+    assert body["suggested_tags"] == ["family", "portrait"]
+    assert body["suggested_location"] == {"place_name": "Hanoi"}
+    assert body["suggested_caption"] == "Updated caption"
+    assert body["primary_bucket_id"] == target.id
+    assert body["primary_bucket_path"] == "Target"
+
+    plan_svc.approve_items([item.id])
+    locked = client.patch(
+        f"/api/routing/plans/{plan.id}/items/{item.id}",
+        json={"suggested_description": "Should fail"},
+    )
+    assert locked.status_code == 400
+    assert "pending" in locked.json()["detail"]
+
+
+def test_update_plan_item_rejects_disabled_or_parent_destination(client, db):
+    _clean(db)
+    tree = RoutingTreeService(db, TEST_USER_ID)
+    source = tree.create_node(RoutingNodeCreate(name="Source"))
+    parent = tree.create_node(RoutingNodeCreate(name="Parent", is_leaf=False))
+    disabled = tree.create_node(RoutingNodeCreate(name="Disabled", enabled=False))
+    plan_svc = RoutingPlanService(db, TEST_USER_ID)
+    plan = plan_svc.create_plan()
+    item = plan_svc.add_item(
+        plan,
+        asset_id="editable-asset",
+        decision=_make_decision(source.id, "Source", review=True),
+        ai_metadata={},
+    )
+
+    for destination_id in (parent.id, disabled.id):
+        response = client.patch(
+            f"/api/routing/plans/{plan.id}/items/{item.id}",
+            json={"primary_bucket_id": destination_id},
+        )
+        assert response.status_code == 400
 
 
 def test_plan_approve_does_not_mutate_items_from_other_plan(client, db):

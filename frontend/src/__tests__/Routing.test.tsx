@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   classifyMock: vi.fn(),
   plansMock: vi.fn(),
   planSummaryMock: vi.fn(),
+  planItemsMock: vi.fn(),
+  updateItemMock: vi.fn(),
+  nodesMock: vi.fn(),
   approveMock: vi.fn(),
   rejectMock: vi.fn(),
   applyMock: vi.fn(),
@@ -29,7 +32,7 @@ vi.mock("../services/api", () => ({
   deleteRoutingNode: mocks.deleteMock,
   duplicateRoutingNode: mocks.dupMock,
   moveRoutingNode: vi.fn(),
-  listRoutingNodes: vi.fn().mockResolvedValue([]),
+  listRoutingNodes: mocks.nodesMock,
   listRoutingExamples: mocks.examplesMock,
   addRoutingExample: mocks.addExampleMock,
   deleteRoutingExample: mocks.deleteExampleMock,
@@ -37,17 +40,20 @@ vi.mock("../services/api", () => ({
   startRoutingClassify: mocks.classifyMock,
   listRoutingPlans: mocks.plansMock,
   getRoutingPlanSummary: mocks.planSummaryMock,
-  getRoutingPlanItems: vi.fn().mockResolvedValue([]),
+  getRoutingPlanItems: mocks.planItemsMock,
+  updateRoutingPlanItem: mocks.updateItemMock,
   approveRoutingPlanItems: mocks.approveMock,
   rejectRoutingPlanItems: mocks.rejectMock,
   moveRoutingPlanItems: vi.fn(),
   applyRoutingPlan: mocks.applyMock,
   getRoutingPlan: vi.fn(),
+  getThumbnailUrl: (assetId: string) => `/api/thumbnails/${assetId}`,
 }));
 
 const {
   treeMock, createMock, examplesMock, promptPreviewMock,
-  classifyMock, plansMock, planSummaryMock, approveMock, rejectMock,
+  classifyMock, plansMock, planSummaryMock, planItemsMock, updateItemMock,
+  nodesMock, approveMock, rejectMock,
 } = mocks;
 
 import Routing from "../pages/Routing";
@@ -74,10 +80,15 @@ beforeEach(() => {
   promptPreviewMock.mockReset();
   plansMock.mockReset();
   planSummaryMock.mockReset();
+  planItemsMock.mockReset();
+  updateItemMock.mockReset();
+  nodesMock.mockReset();
   approveMock.mockReset();
   rejectMock.mockReset();
   classifyMock.mockReset();
   classifyMock.mockResolvedValue({ job_id: "job-1", plan_id: "plan-1", status: "queued" });
+  planItemsMock.mockResolvedValue([]);
+  nodesMock.mockResolvedValue([]);
   planSummaryMock.mockResolvedValue({
     plan_id: "plan-1",
     total: 0,
@@ -218,6 +229,12 @@ describe("Routing plans page", () => {
     ]);
     planSummaryMock.mockResolvedValue({
       plan_id: "p1", total: 5,
+      writeback: {
+        write_description: 5,
+        write_tags: 3,
+        move_to_album: 3,
+        move_to_trash: 0,
+      },
       groups: {
         auto_applied: [],
         ready_to_approve: [{ path: "Personal/Lake", bucket_id: "b1", count: 3, item_ids: ["i1","i2","i3"] }],
@@ -234,9 +251,13 @@ describe("Routing plans page", () => {
     expect(screen.getByText("Needs review")).toBeInTheDocument();
     expect(screen.getByText("Personal/Lake")).toBeInTheDocument();
     expect(screen.getByText("Family/Kids")).toBeInTheDocument();
+    expect(screen.getByText("Write descriptions: 5 items")).toBeInTheDocument();
+    expect(screen.getByText("Write tags: 3 items")).toBeInTheDocument();
+    expect(screen.getByText("Move to albums: 3 items")).toBeInTheDocument();
+    expect(screen.queryByText(/Move to trash:/)).not.toBeInTheDocument();
   });
 
-  it("approves a group via the Approve button", async () => {
+  it("approves a group via the Approve All button", async () => {
     plansMock.mockResolvedValue([
       { id: "p1", job_id: null, status: "ready", item_count: 1,
         created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
@@ -256,8 +277,115 @@ describe("Routing plans page", () => {
     render(<Wrapper><RoutingPlans /></Wrapper>);
     await waitFor(() => expect(screen.getByText(/ready/i)).toBeInTheDocument());
     fireEvent.click(screen.getByText(/ready/i));
-    await waitFor(() => expect(screen.getByText("Approve")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("Approve"));
-    await waitFor(() => expect(approveMock).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText("Approve All")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Approve All"));
+    await waitFor(() => expect(approveMock).toHaveBeenCalledWith("p1", { item_ids: ["i1"] }));
+  });
+
+  it("expands a group, saves edits, and approves one item", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 1,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [{ path: "Personal", bucket_id: "b1", count: 1, item_ids: ["i1"] }],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+    const item = {
+      id: "i1", plan_id: "p1", asset_id: "a1",
+      primary_bucket_id: "b1", primary_bucket_path: "Personal",
+      secondary_bucket_ids: [], disposition: "keep" as const,
+      confidence: 0.9, review_required: false, auto_apply: false,
+      review_reasons: [], reason_codes: [], safety_flags: {}, quality_flags: {},
+      suggested_description: "Original", suggested_tags: ["family"],
+      suggested_location: { place_name: "Hanoi" }, suggested_caption: "Caption",
+      status: "pending" as const, error_message: null,
+    };
+    planItemsMock.mockResolvedValue([item]);
+    updateItemMock.mockResolvedValue({ ...item, suggested_description: "Edited" });
+    approveMock.mockResolvedValue({ approved: 1 });
+    nodesMock.mockResolvedValue([{
+      id: "b1", name: "Personal", path: "Personal", parent_id: null,
+      is_leaf: true, enabled: true, destination_type: "immich_album",
+    }]);
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
+
+    const description = await screen.findByDisplayValue("Original");
+    fireEvent.change(description, { target: { value: "Edited" } });
+    fireEvent.blur(description);
+    await waitFor(() => expect(updateItemMock).toHaveBeenCalledWith(
+      "p1",
+      "i1",
+      expect.objectContaining({ suggested_description: "Edited" })
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(approveMock).toHaveBeenCalledWith("p1", { item_ids: ["i1"] }));
+  });
+
+  it("renders reviewed items as read-only when revisiting a plan", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 1,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [{ path: "Personal", bucket_id: "b1", count: 1, item_ids: ["i1"] }],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+    planItemsMock.mockResolvedValue([{
+      id: "i1", plan_id: "p1", asset_id: "a1",
+      primary_bucket_id: "b1", primary_bucket_path: "Personal",
+      secondary_bucket_ids: [], disposition: "keep", confidence: 0.9,
+      review_required: false, auto_apply: false, review_reasons: [],
+      reason_codes: [], safety_flags: {}, quality_flags: {},
+      suggested_description: "Approved description", suggested_tags: ["family"],
+      suggested_location: null, suggested_caption: null,
+      status: "approved", error_message: null,
+    }]);
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
+
+    expect(await screen.findByText("Approved description")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Approved description")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  });
+
+  it("paginates expanded groups in pages of 100", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 101,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 101,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [{ path: "Personal", bucket_id: "b1", count: 101, item_ids: [] }],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
+
+    expect(await screen.findByText("Page 1 of 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(planItemsMock).toHaveBeenLastCalledWith(
+      "p1",
+      expect.objectContaining({ page: 2, page_size: 100 })
+    ));
   });
 });
