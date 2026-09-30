@@ -188,7 +188,7 @@ function ReviewItem({
       <div className={styles.itemActions}>
         <span className={styles.status}>{item.status}</span>
         {editable && (
-          <>
+          <div className={styles.itemButtonRow}>
             <button
               className={styles.approve}
               disabled={busy}
@@ -211,7 +211,7 @@ function ReviewItem({
                 <LoaderCircle className={styles.spinner} size={14} />
               ) : <X size={14} />}
             </button>
-          </>
+          </div>
         )}
         {saveError && <span className={styles.error}>Save failed</span>}
         {reviewError && <span className={styles.error}>Action failed</span>}

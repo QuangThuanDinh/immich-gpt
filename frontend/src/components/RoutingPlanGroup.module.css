@@ -178,21 +178,28 @@
 
 .itemActions {
   width: 64px;
-  flex-wrap: wrap;
+  flex-direction: column;
   justify-content: center;
   padding-right: 12px;
+}
+
+.itemButtonRow {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
 }
 
 .itemActions button {
   display: grid;
   width: 25px;
   height: 25px;
+  box-sizing: border-box;
+  flex: 0 0 25px;
   place-items: center;
   padding: 0;
 }
 
 .status {
-  flex-basis: 100%;
   color: #94a3b8;
   font-size: 10px;
   text-align: center;
@@ -200,7 +207,6 @@
 }
 
 .itemActions .error {
-  flex-basis: 100%;
   padding: 0;
 }
 
