@@ -19,7 +19,7 @@ _WEAK_SECRET_KEYS = {
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "Immich GPT"
-    APP_VERSION: str = "0.6.13"
+    APP_VERSION: str = "0.6.14"
     DEBUG: bool = False
 
     # Database — SQLite is the supported and recommended database.
