@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, LoaderCircle } from "lucide-react";
 import {
   approveRoutingPlanItems,
   getRoutingPlanItems,
@@ -18,6 +18,10 @@ import Thumbnail from "./Thumbnail";
 import styles from "./RoutingPlanGroup.module.css";
 
 const PAGE_SIZE = 50;
+const ACTION_BATCH_SIZE = 10;
+
+type ReviewAction = "approve" | "reject";
+type GroupActionKey = "approve-all" | "reject-all" | "approve-page" | "reject-page";
 
 interface Props {
   planId: string;
@@ -54,7 +58,9 @@ function ReviewItem({
   const [caption, setCaption] = useState(item.suggested_caption ?? "");
   const [bucketId, setBucketId] = useState(item.primary_bucket_id ?? "");
   const [busy, setBusy] = useState(false);
+  const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [reviewError, setReviewError] = useState(false);
   const editable = item.status === "pending";
 
   useEffect(() => {
@@ -102,8 +108,10 @@ function ReviewItem({
     }
   };
 
-  const review = async (action: "approve" | "reject") => {
+  const review = async (action: ReviewAction) => {
     setBusy(true);
+    setReviewAction(action);
+    setReviewError(false);
     try {
       await save();
       if (action === "approve") {
@@ -116,8 +124,11 @@ function ReviewItem({
         qc.invalidateQueries({ queryKey: ["routing-plan-summary", planId] }),
         qc.invalidateQueries({ queryKey: ["routing-plans"] }),
       ]);
+    } catch {
+      setReviewError(true);
     } finally {
       setBusy(false);
+      setReviewAction(null);
     }
   };
 
@@ -178,11 +189,20 @@ function ReviewItem({
         <span className={styles.status}>{item.status}</span>
         {editable && (
           <>
-            <button className={styles.approve} disabled={busy} onClick={() => void review("approve")}>Approve</button>
-            <button className={styles.reject} disabled={busy} onClick={() => void review("reject")}>Reject</button>
+            <button className={styles.approve} disabled={busy} onClick={() => void review("approve")}>
+              {reviewAction === "approve" ? (
+                <span className={styles.buttonContent}><LoaderCircle className={styles.spinner} size={12} />Processing...</span>
+              ) : "Approve"}
+            </button>
+            <button className={styles.reject} disabled={busy} onClick={() => void review("reject")}>
+              {reviewAction === "reject" ? (
+                <span className={styles.buttonContent}><LoaderCircle className={styles.spinner} size={12} />Processing...</span>
+              ) : "Reject"}
+            </button>
           </>
         )}
         {saveError && <span className={styles.error}>Save failed</span>}
+        {reviewError && <span className={styles.error}>Action failed</span>}
       </div>
     </div>
   );
@@ -200,6 +220,12 @@ export default function RoutingPlanGroup({
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{
+    action: GroupActionKey;
+    completed: number;
+    total: number;
+  } | null>(null);
+  const [actionError, setActionError] = useState(false);
   const totalPages = Math.max(1, Math.ceil(group.count / PAGE_SIZE));
   const queryKey = [
     "routing-plan-items",
@@ -231,23 +257,50 @@ export default function RoutingPlanGroup({
     [items]
   );
 
-  const runAction = async (action: "approve" | "reject", itemIds: string[]) => {
+  const runAction = async (
+    action: ReviewAction,
+    itemIds: string[],
+    actionKey: GroupActionKey
+  ) => {
     if (itemIds.length === 0) return;
     setBusy(true);
+    setActionError(false);
+    setProgress({ action: actionKey, completed: 0, total: itemIds.length });
     try {
-      if (action === "approve") {
-        await approveRoutingPlanItems(planId, { item_ids: itemIds });
-      } else {
-        await rejectRoutingPlanItems(planId, { item_ids: itemIds });
+      for (let offset = 0; offset < itemIds.length; offset += ACTION_BATCH_SIZE) {
+        const batch = itemIds.slice(offset, offset + ACTION_BATCH_SIZE);
+        if (action === "approve") {
+          await approveRoutingPlanItems(planId, { item_ids: batch });
+        } else {
+          await rejectRoutingPlanItems(planId, { item_ids: batch });
+        }
+        setProgress({
+          action: actionKey,
+          completed: Math.min(offset + batch.length, itemIds.length),
+          total: itemIds.length,
+        });
       }
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["routing-plan-items", planId] }),
         qc.invalidateQueries({ queryKey: ["routing-plan-summary", planId] }),
         qc.invalidateQueries({ queryKey: ["routing-plans"] }),
       ]);
+    } catch {
+      setActionError(true);
     } finally {
       setBusy(false);
+      setProgress(null);
     }
+  };
+
+  const actionLabel = (action: GroupActionKey, label: string) => {
+    if (progress?.action !== action) return label;
+    return (
+      <span className={styles.buttonContent}>
+        <LoaderCircle className={styles.spinner} size={12} />
+        Processing {progress.completed}/{progress.total}
+      </span>
+    );
   };
 
   return (
@@ -267,16 +320,17 @@ export default function RoutingPlanGroup({
         </button>
         {allowActions && (
           <div className={styles.groupActions}>
-            <button disabled={busy} className={styles.approve} onClick={() => void runAction("approve", group.item_ids)}>Approve All</button>
-            <button disabled={busy} className={styles.reject} onClick={() => void runAction("reject", group.item_ids)}>Reject All</button>
-            <button disabled={busy || !expanded || pendingPageIds.length === 0} className={styles.approve} onClick={() => void runAction("approve", pendingPageIds)}>Approve This Page</button>
-            <button disabled={busy || !expanded || pendingPageIds.length === 0} className={styles.reject} onClick={() => void runAction("reject", pendingPageIds)}>Reject This Page</button>
+            <button disabled={busy} className={styles.approve} onClick={() => void runAction("approve", group.item_ids, "approve-all")}>{actionLabel("approve-all", "Approve All")}</button>
+            <button disabled={busy} className={styles.reject} onClick={() => void runAction("reject", group.item_ids, "reject-all")}>{actionLabel("reject-all", "Reject All")}</button>
+            <button disabled={busy || !expanded || pendingPageIds.length === 0} className={styles.approve} onClick={() => void runAction("approve", pendingPageIds, "approve-page")}>{actionLabel("approve-page", "Approve This Page")}</button>
+            <button disabled={busy || !expanded || pendingPageIds.length === 0} className={styles.reject} onClick={() => void runAction("reject", pendingPageIds, "reject-page")}>{actionLabel("reject-page", "Reject This Page")}</button>
           </div>
         )}
       </div>
 
       {expanded && (
         <div className={styles.panel}>
+          {actionError && <div className={`${styles.message} ${styles.error}`}>Could not complete the review action. Completed batches were saved.</div>}
           {isLoading && <div className={styles.message}>Loading photos...</div>}
           {isError && <div className={`${styles.message} ${styles.error}`}>Could not load photos.</div>}
           {!isLoading && !isError && items.length === 0 && <div className={styles.message}>No photos on this page.</div>}
@@ -287,9 +341,9 @@ export default function RoutingPlanGroup({
           </div>
           {totalPages > 1 && (
             <div className={styles.pagination}>
-              <button disabled={page === 1} onClick={() => setPage((value) => value - 1)}>Previous</button>
+              <button disabled={busy || page === 1} onClick={() => setPage((value) => value - 1)}>Previous</button>
               <span>Page {page} of {totalPages}</span>
-              <button disabled={page === totalPages} onClick={() => setPage((value) => value + 1)}>Next</button>
+              <button disabled={busy || page === totalPages} onClick={() => setPage((value) => value + 1)}>Next</button>
             </div>
           )}
         </div>

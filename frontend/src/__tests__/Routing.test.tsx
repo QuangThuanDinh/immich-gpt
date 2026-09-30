@@ -73,6 +73,16 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 beforeEach(() => {
   treeMock.mockReset();
   createMock.mockReset();
@@ -531,5 +541,77 @@ describe("Routing plans page", () => {
     expect(screen.getByRole("button", { name: "Collapse Work" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand Personal" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Collapse Personal" })).not.toBeInTheDocument();
+  });
+
+  it("shows a spinner while an individual action is processing", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 1,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [{ path: "Personal", bucket_id: "b1", count: 1, item_ids: ["i1"] }],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+    planItemsMock.mockResolvedValue([{
+      id: "i1", plan_id: "p1", asset_id: "a1",
+      primary_bucket_id: "b1", primary_bucket_path: "Personal",
+      secondary_bucket_ids: [], disposition: "keep", confidence: 0.9,
+      review_required: false, auto_apply: false, review_reasons: [],
+      reason_codes: [], safety_flags: {}, quality_flags: {},
+      suggested_description: null, suggested_tags: [],
+      suggested_location: null, suggested_caption: null,
+      status: "pending", error_message: null,
+    }]);
+    updateItemMock.mockResolvedValue({});
+    const action = deferred<{ approved: number }>();
+    approveMock.mockReturnValueOnce(action.promise);
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByText("Processing...")).toBeInTheDocument();
+    action.resolve({ approved: 1 });
+    await waitFor(() => expect(screen.queryByText("Processing...")).not.toBeInTheDocument());
+  });
+
+  it("shows completed and total progress for batched group actions", async () => {
+    const itemIds = Array.from({ length: 11 }, (_, index) => `i${index + 1}`);
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 11,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 11,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [{ path: "Personal", bucket_id: "b1", count: 11, item_ids: itemIds }],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+    const firstBatch = deferred<{ approved: number }>();
+    const secondBatch = deferred<{ approved: number }>();
+    approveMock
+      .mockReturnValueOnce(firstBatch.promise)
+      .mockReturnValueOnce(secondBatch.promise);
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve All" }));
+
+    expect(await screen.findByText("Processing 0/11")).toBeInTheDocument();
+    expect(approveMock).toHaveBeenNthCalledWith(1, "p1", { item_ids: itemIds.slice(0, 10) });
+
+    firstBatch.resolve({ approved: 10 });
+    expect(await screen.findByText("Processing 10/11")).toBeInTheDocument();
+    expect(approveMock).toHaveBeenNthCalledWith(2, "p1", { item_ids: itemIds.slice(10) });
+
+    secondBatch.resolve({ approved: 1 });
+    await waitFor(() => expect(screen.queryByText(/Processing \d+\/11/)).not.toBeInTheDocument());
   });
 });

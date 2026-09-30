@@ -64,6 +64,24 @@
   cursor: pointer;
 }
 
+.buttonContent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .groupActions button:disabled,
 .itemActions button:disabled,
 .pagination button:disabled {
@@ -159,7 +177,7 @@
 }
 
 .itemActions {
-  width: 86px;
+  width: 112px;
   flex-direction: column;
   justify-content: center;
   padding-right: 12px;
