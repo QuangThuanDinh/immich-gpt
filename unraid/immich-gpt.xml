@@ -111,6 +111,18 @@
     Mask="true"
   ></Config>
 
+  <Config
+    Name="Allow Private Service URLs"
+    Target="ALLOW_PRIVATE_SERVICE_URLS"
+    Default="false"
+    Mode=""
+    Description="Set true only when Immich, Ollama, or a custom OpenRouter-compatible service uses a trusted LAN or localhost URL."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"
+  >false</Config>
+
   <!-- ── AI provider ───────────────────────────────────────────────────── -->
   <Config
     Name="OpenAI API Key"

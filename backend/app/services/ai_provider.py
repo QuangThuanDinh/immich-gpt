@@ -7,8 +7,26 @@ routing schema is done in the orchestrator with `AIRoutingResult`.
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
+from urllib.parse import urlparse
 
-from .url_validation import validate_service_url
+from .url_validation import ServiceUrlError, validate_service_url
+
+
+OPENROUTER_DEFAULT_ORIGIN = "https://openrouter.ai"
+
+
+def get_openrouter_api_base_url(base_url: Optional[str] = None) -> str:
+    """Return the validated OpenRouter-compatible /api/v1 endpoint."""
+    origin = validate_service_url(
+        base_url or OPENROUTER_DEFAULT_ORIGIN,
+        field_name="OpenRouter Base URL",
+    )
+    parsed = urlparse(origin)
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ServiceUrlError(
+            "OpenRouter Base URL must be an origin without a path, query, or fragment"
+        )
+    return f"{origin.rstrip('/')}/api/v1"
 
 
 class AIProvider(ABC):
@@ -199,13 +217,17 @@ class OllamaProvider(AIProvider):
 
 
 class OpenRouterProvider(AIProvider):
-    """OpenRouter — OpenAI-compatible API at openrouter.ai."""
+    """OpenRouter-compatible API using the hosted service or a custom origin."""
 
-    BASE_URL = "https://openrouter.ai/api/v1"
-
-    def __init__(self, api_key: str, model: str = "openai/gpt-4o"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "openai/gpt-4o",
+        base_url: Optional[str] = None,
+    ):
         self._api_key = api_key
         self._model = model
+        self.base_url = get_openrouter_api_base_url(base_url)
         self._extra_headers = {
             "HTTP-Referer": "https://github.com/titatom/immich-gpt",
             "X-Title": "immich-gpt",
@@ -213,7 +235,7 @@ class OpenRouterProvider(AIProvider):
         from openai import OpenAI
         self._client = OpenAI(
             api_key=api_key,
-            base_url=self.BASE_URL,
+            base_url=self.base_url,
             default_headers=self._extra_headers,
         )
 
@@ -225,7 +247,7 @@ class OpenRouterProvider(AIProvider):
         try:
             import httpx
             r = httpx.get(
-                f"{self.BASE_URL}/auth/key",
+                f"{self.base_url}/models",
                 headers={
                     "Authorization": f"Bearer {self._api_key}",
                     **self._extra_headers,
@@ -283,5 +305,6 @@ def build_provider(provider_name: str, config: dict) -> AIProvider:
         return OpenRouterProvider(
             api_key=config["api_key"],
             model=config.get("model_name", "openai/gpt-4o"),
+            base_url=config.get("base_url"),
         )
     raise ValueError(f"Unknown provider: {provider_name}")

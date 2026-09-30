@@ -46,6 +46,7 @@ services:
       # Optional here — can also be configured per-user in the web UI.
       IMMICH_URL: ${IMMICH_URL:-}
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+      ALLOW_PRIVATE_SERVICE_URLS: ${ALLOW_PRIVATE_SERVICE_URLS:-false}
       # ── AI provider ────────────────────────────────────────────────────
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}

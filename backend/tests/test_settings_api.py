@@ -18,7 +18,13 @@ from app.services.secret_store import decrypt_secret
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_provider(db, name="openai", enabled=True, is_default=False) -> ProviderConfig:
+def _make_provider(
+    db,
+    name="openai",
+    enabled=True,
+    is_default=False,
+    base_url=None,
+) -> ProviderConfig:
     from tests.conftest import TEST_USER_ID
     p = ProviderConfig(
         id=str(uuid.uuid4()),
@@ -27,6 +33,7 @@ def _make_provider(db, name="openai", enabled=True, is_default=False) -> Provide
         enabled=enabled,
         is_default=is_default,
         api_key_encrypted="sk-test",
+        base_url=base_url,
         model_name="gpt-4o",
     )
     db.add(p)
@@ -295,6 +302,46 @@ def test_test_provider_failure(client, db):
 
     assert r.status_code == 400
     assert "bad key" in r.json()["detail"]
+
+
+def test_list_ollama_models_rejects_restricted_url(client, db, monkeypatch):
+    from app.config import settings
+
+    _make_provider(
+        db,
+        "ollama",
+        base_url="http://169.254.169.254/latest/meta-data",
+    )
+    monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", False)
+
+    with patch("httpx.get") as http_get:
+        r = client.get("/api/settings/providers/ollama/models")
+
+    assert r.status_code == 400
+    assert "restricted network address" in r.json()["detail"]
+    http_get.assert_not_called()
+
+
+def test_list_openrouter_models_uses_custom_base_url(client, db, monkeypatch):
+    from app.config import settings
+
+    _make_provider(
+        db,
+        "openrouter",
+        base_url="http://192.168.0.19:4000",
+    )
+    monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
+    response = MagicMock()
+    response.json.return_value = {
+        "data": [{"id": "local/model", "name": "Local Model"}]
+    }
+
+    with patch("httpx.get", return_value=response) as http_get:
+        r = client.get("/api/settings/providers/openrouter/models")
+
+    assert r.status_code == 200
+    assert r.json() == [{"id": "local/model", "name": "Local Model"}]
+    assert http_get.call_args.args[0] == "http://192.168.0.19:4000/api/v1/models"
 
 
 def test_routing_preferences_default_off(client):

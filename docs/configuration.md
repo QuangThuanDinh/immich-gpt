@@ -166,7 +166,10 @@ Provider definitions are stored per user in the database.
 
 - hosted aggregator for many model vendors
 - uses its own API key
-- uses `https://openrouter.ai/api/v1` automatically
+- uses `https://openrouter.ai/api/v1` by default
+- accepts an optional origin-only Base URL, such as `http://192.168.0.19:4000`;
+  the backend appends `/api/v1`
+- private or local Base URLs require `ALLOW_PRIVATE_SERVICE_URLS=true`
 - can list available models after the provider is saved
 
 #### Ollama

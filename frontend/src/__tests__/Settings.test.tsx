@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import Settings from "../pages/Settings";
@@ -46,5 +46,17 @@ describe("Settings page", () => {
 
     const input = await screen.findByDisplayValue("http://immich.example");
     expect(input).toBeInTheDocument();
+  });
+
+  it("allows an optional OpenRouter base URL", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Add Provider/i }));
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "openrouter" },
+    });
+
+    expect(screen.getByPlaceholderText("https://openrouter.ai")).toBeInTheDocument();
+    expect(screen.getByText(/backend appends \/api\/v1/i)).toBeInTheDocument();
   });
 });

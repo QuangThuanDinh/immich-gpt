@@ -19,6 +19,7 @@ from ..services.secret_store import (
     has_secret,
     is_encrypted_secret,
 )
+from ..services.url_validation import ServiceUrlError, validate_service_url
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -235,8 +236,11 @@ def list_provider_models(
     try:
         if provider_name == "openrouter":
             import httpx
+            from ..services.ai_provider import get_openrouter_api_base_url
+
+            base = get_openrouter_api_base_url(row.base_url)
             r = httpx.get(
-                "https://openrouter.ai/api/v1/models",
+                f"{base}/models",
                 headers={"Authorization": f"Bearer {decrypt_secret(row.api_key_encrypted) or ''}"},
                 timeout=10,
             )
@@ -245,7 +249,10 @@ def list_provider_models(
             return [{"id": m["id"], "name": m.get("name", m["id"])} for m in data]
         elif provider_name == "ollama":
             import httpx
-            base = row.base_url or "http://localhost:11434"
+            base = validate_service_url(
+                row.base_url or "http://localhost:11434",
+                field_name="Ollama URL",
+            )
             r = httpx.get(f"{base}/api/tags", timeout=10)
             r.raise_for_status()
             models = r.json().get("models", [])
@@ -254,6 +261,8 @@ def list_provider_models(
             raise HTTPException(status_code=400, detail=f"Model listing not supported for {provider_name}")
     except HTTPException:
         raise
+    except ServiceUrlError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
