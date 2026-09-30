@@ -106,8 +106,11 @@ def run_asset_sync(
             job_svc.complete_job(
                 job_id,
                 message=(
-                    f"Sync complete. Created: {result['created']}, "
-                    f"Updated: {result['updated']}, Errors: {result['errors']}"
+                    f"Sync complete. Retained: {result['synced']}, "
+                    f"Created: {result['created']}, "
+                    f"Updated: {result['updated']}, "
+                    f"Live Photo motion assets filtered: {result.get('filtered', 0)}, "
+                    f"Errors: {result['errors']}"
                 ),
             )
             if run_routing_after:

@@ -3,7 +3,7 @@ Asset sync service: pulls assets from Immich and stores them locally.
 """
 import uuid
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List, Callable, Set, Tuple
 from sqlalchemy.orm import Session
 
 from ..models.asset import Asset
@@ -40,11 +40,18 @@ class AssetSyncService:
         should_stop: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, int]:
         """Sync all assets from Immich."""
-        return self._sync_paged(
+        result, completed, created_ids, updated_ids = self._sync_paged(
             fetch_fn=lambda page: self.immich.list_assets(page=page, page_size=page_size),
             job_progress_callback=job_progress_callback,
             page_size=page_size,
             should_stop=should_stop,
+        )
+        return self._finish_sync(
+            result,
+            completed,
+            created_ids,
+            updated_ids,
+            job_progress_callback,
         )
 
     def sync_favorites(
@@ -54,13 +61,20 @@ class AssetSyncService:
         should_stop: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, int]:
         """Sync only favorited assets from Immich."""
-        return self._sync_paged(
+        result, completed, created_ids, updated_ids = self._sync_paged(
             fetch_fn=lambda page: self.immich.list_assets(
                 page=page, page_size=page_size, is_favorite=True
             ),
             job_progress_callback=job_progress_callback,
             page_size=page_size,
             should_stop=should_stop,
+        )
+        return self._finish_sync(
+            result,
+            completed,
+            created_ids,
+            updated_ids,
+            job_progress_callback,
         )
 
     def sync_album(
@@ -71,13 +85,20 @@ class AssetSyncService:
         should_stop: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, int]:
         """Sync assets from a specific album."""
-        return self._sync_paged(
+        result, completed, created_ids, updated_ids = self._sync_paged(
             fetch_fn=lambda page: self.immich.list_album_assets(
                 album_id=album_id, page=page, page_size=page_size
             ),
             job_progress_callback=job_progress_callback,
             page_size=page_size,
             should_stop=should_stop,
+        )
+        return self._finish_sync(
+            result,
+            completed,
+            created_ids,
+            updated_ids,
+            job_progress_callback,
         )
 
     def sync_albums(
@@ -89,24 +110,73 @@ class AssetSyncService:
     ) -> Dict[str, int]:
         """Sync assets from multiple albums."""
         total_created = total_updated = total_errors = 0
+        created_ids: Set[str] = set()
+        updated_ids: Set[str] = set()
+        completed = True
         for album_id in album_ids:
             if should_stop and should_stop():
                 if job_progress_callback:
                     job_progress_callback("Sync stopped due to pause/cancel request.")
+                completed = False
                 break
             if job_progress_callback:
                 job_progress_callback(f"Syncing album {album_id}")
-            result = self.sync_album(
-                album_id,
-                job_progress_callback=job_progress_callback,
-                page_size=page_size,
-                should_stop=should_stop,
+            result, album_completed, album_created_ids, album_updated_ids = (
+                self._sync_paged(
+                    fetch_fn=lambda page, current_album_id=album_id: (
+                        self.immich.list_album_assets(
+                            album_id=current_album_id,
+                            page=page,
+                            page_size=page_size,
+                        )
+                    ),
+                    job_progress_callback=job_progress_callback,
+                    page_size=page_size,
+                    should_stop=should_stop,
+                )
             )
             total_created += result["created"]
             total_updated += result["updated"]
             total_errors += result["errors"]
-        synced = total_created + total_updated
-        return {"synced": synced, "created": total_created, "updated": total_updated, "errors": total_errors}
+            created_ids.update(album_created_ids)
+            updated_ids.update(album_updated_ids)
+            if not album_completed:
+                completed = False
+                break
+
+        return self._finish_sync(
+            {
+                "created": total_created,
+                "updated": total_updated,
+                "errors": total_errors,
+            },
+            completed,
+            created_ids,
+            updated_ids,
+            job_progress_callback,
+        )
+
+    def _finish_sync(
+        self,
+        result: Dict[str, int],
+        completed: bool,
+        created_ids: Set[str],
+        updated_ids: Set[str],
+        job_progress_callback=None,
+    ) -> Dict[str, int]:
+        filtered_ids: Set[str] = set()
+        if completed:
+            filtered_ids = self._remove_live_photo_motion_assets()
+            if filtered_ids and job_progress_callback:
+                job_progress_callback(
+                    f"Filtered {len(filtered_ids)} linked Live Photo motion asset(s)"
+                )
+
+        result["created"] -= len(filtered_ids & created_ids)
+        result["updated"] -= len(filtered_ids & updated_ids)
+        result["synced"] = result["created"] + result["updated"]
+        result["filtered"] = len(filtered_ids)
+        return result
 
     _COMMIT_BATCH_SIZE = 100
 
@@ -116,11 +186,14 @@ class AssetSyncService:
         job_progress_callback=None,
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+    ) -> Tuple[Dict[str, int], bool, Set[str], Set[str]]:
         created = updated = errors = 0
+        created_ids: Set[str] = set()
+        updated_ids: Set[str] = set()
         page = 1
         synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
         pending = 0  # rows flushed but not yet committed
+        completed = False
 
         while True:
             # Cooperative stop check (pause/cancel)
@@ -139,13 +212,19 @@ class AssetSyncService:
                 break
 
             if not raw_assets:
+                completed = True
                 break
 
             for raw in raw_assets:
                 try:
-                    c, u, _ = self._upsert_asset(raw, synced_at)
+                    c, u, asset_id = self._upsert_asset(raw, synced_at)
                     created += c
                     updated += u
+                    if asset_id:
+                        if c:
+                            created_ids.add(asset_id)
+                        elif u:
+                            updated_ids.add(asset_id)
                     pending += 1
                 except Exception:
                     errors += 1
@@ -155,6 +234,7 @@ class AssetSyncService:
                     pending = 0
 
             if len(raw_assets) < page_size:
+                completed = True
                 break
             page += 1
 
@@ -162,7 +242,42 @@ class AssetSyncService:
         if pending:
             self.db.commit()
 
-        return {"synced": created + updated, "created": created, "updated": updated, "errors": errors}
+        return (
+            {
+                "created": created,
+                "updated": updated,
+                "errors": errors,
+            },
+            completed,
+            created_ids,
+            updated_ids,
+        )
+
+    def _remove_live_photo_motion_assets(self) -> Set[str]:
+        query = self.db.query(Asset)
+        if self.user_id:
+            query = query.filter(Asset.user_id == self.user_id)
+        assets = query.all()
+        motion_assets = {
+            (asset.user_id, metadata.get("livePhotoVideoId"))
+            for asset in assets
+            if isinstance((metadata := asset.raw_metadata_json), dict)
+            and metadata.get("livePhotoVideoId")
+        }
+        if not motion_assets:
+            return set()
+
+        companions = [
+            asset for asset in assets
+            if (asset.user_id, asset.immich_id) in motion_assets
+            and asset.asset_type == "VIDEO"
+        ]
+        companion_ids = {asset.id for asset in companions}
+        for companion in companions:
+            self.db.delete(companion)
+        if companions:
+            self.db.commit()
+        return companion_ids
 
     def _upsert_asset(self, raw: Dict[str, Any], synced_at: datetime):
         immich_id = raw.get("id")

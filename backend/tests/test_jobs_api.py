@@ -199,6 +199,10 @@ def test_run_asset_sync_enqueues_routing_after_success(db, monkeypatch):
 
     refreshed = db.query(JobRun).filter(JobRun.id == job_id).first()
     assert refreshed.status == "completed"
+    assert refreshed.message == (
+        "Sync complete. Retained: 1, Created: 1, Updated: 0, "
+        "Live Photo motion assets filtered: 0, Errors: 0"
+    )
     assert enqueued
     assert enqueued[0][1]["user_id"] == TEST_USER_ID
     assert enqueued[0][1]["force"] is False
