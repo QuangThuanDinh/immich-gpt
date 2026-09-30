@@ -282,6 +282,31 @@ describe("Routing plans page", () => {
     await waitFor(() => expect(approveMock).toHaveBeenCalledWith("p1", { item_ids: ["i1"] }));
   });
 
+  it("rejects a group via the Reject All button", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 2,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 2,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [{ path: "X", bucket_id: "b1", count: 2, item_ids: ["i1", "i2"] }],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+    rejectMock.mockResolvedValue({ rejected: 1 });
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Reject All" }));
+
+    await waitFor(() => expect(rejectMock).toHaveBeenCalledWith(
+      "p1",
+      { item_ids: ["i1", "i2"] }
+    ));
+  });
+
   it("expands a group, saves edits, and approves one item", async () => {
     plansMock.mockResolvedValue([
       { id: "p1", job_id: null, status: "ready", item_count: 1,
@@ -328,6 +353,92 @@ describe("Routing plans page", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(approveMock).toHaveBeenCalledWith("p1", { item_ids: ["i1"] }));
+  });
+
+  it("rejects one pending item", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 1,
+      groups: {
+        auto_applied: [],
+        needs_review: [{ path: "Personal", bucket_id: "b1", count: 1, item_ids: ["i1"] }],
+        ready_to_approve: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+    planItemsMock.mockResolvedValue([{
+      id: "i1", plan_id: "p1", asset_id: "a1",
+      primary_bucket_id: "b1", primary_bucket_path: "Personal",
+      secondary_bucket_ids: [], disposition: "review", confidence: 0.7,
+      review_required: true, auto_apply: false, review_reasons: [],
+      reason_codes: [], safety_flags: {}, quality_flags: {},
+      suggested_description: null, suggested_tags: [],
+      suggested_location: null, suggested_caption: null,
+      status: "pending", error_message: null,
+    }]);
+    updateItemMock.mockResolvedValue({});
+    rejectMock.mockResolvedValue({ rejected: 1 });
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
+
+    await waitFor(() => expect(rejectMock).toHaveBeenCalledWith("p1", { item_ids: ["i1"] }));
+  });
+
+  it("scopes page actions to pending items on the visible page", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 2,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 2,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [{
+          path: "Personal", bucket_id: "b1", count: 2,
+          item_ids: ["pending", "approved"],
+        }],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+    const baseItem = {
+      plan_id: "p1", asset_id: "a1", primary_bucket_id: "b1",
+      primary_bucket_path: "Personal", secondary_bucket_ids: [],
+      disposition: "keep", confidence: 0.9, review_required: false,
+      auto_apply: false, review_reasons: [], reason_codes: [],
+      safety_flags: {}, quality_flags: {}, suggested_description: null,
+      suggested_tags: [], suggested_location: null, suggested_caption: null,
+      error_message: null,
+    };
+    planItemsMock.mockResolvedValue([
+      { ...baseItem, id: "pending", status: "pending" },
+      { ...baseItem, id: "approved", status: "approved" },
+    ]);
+    approveMock.mockResolvedValue({ approved: 1 });
+    rejectMock.mockResolvedValue({ rejected: 1 });
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
+    const approvePage = await screen.findByRole("button", { name: "Approve This Page" });
+    await waitFor(() => expect(approvePage).toBeEnabled());
+    fireEvent.click(approvePage);
+    await waitFor(() => expect(approveMock).toHaveBeenCalledWith(
+      "p1",
+      { item_ids: ["pending"] }
+    ));
+
+    const rejectPage = screen.getByRole("button", { name: "Reject This Page" });
+    await waitFor(() => expect(rejectPage).toBeEnabled());
+    fireEvent.click(rejectPage);
+    await waitFor(() => expect(rejectMock).toHaveBeenCalledWith(
+      "p1",
+      { item_ids: ["pending"] }
+    ));
   });
 
   it("renders reviewed items as read-only when revisiting a plan", async () => {
@@ -387,5 +498,38 @@ describe("Routing plans page", () => {
       "p1",
       expect.objectContaining({ page: 2, page_size: 100 })
     ));
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    await waitFor(() => expect(planItemsMock).toHaveBeenLastCalledWith(
+      "p1",
+      expect.objectContaining({ page: 1, page_size: 100 })
+    ));
+  });
+
+  it("keeps only one plan section expanded at a time", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 2,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 2,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [
+          { path: "Personal", bucket_id: "b1", count: 1, item_ids: ["i1"] },
+          { path: "Work", bucket_id: "b2", count: 1, item_ids: ["i2"] },
+        ],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
+    expect(screen.getByRole("button", { name: "Collapse Personal" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Work" }));
+    expect(screen.getByRole("button", { name: "Collapse Work" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand Personal" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse Personal" })).not.toBeInTheDocument();
   });
 });

@@ -37,6 +37,7 @@ export default function RoutingPlans() {
   });
   const destinations = routingNodes.filter((node) => node.is_leaf && node.enabled);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useQuery<RoutingPlanSummary>({
     queryKey: ["routing-plan-summary", selectedPlanId],
@@ -92,7 +93,10 @@ export default function RoutingPlans() {
           {plans.map((p) => (
             <div
               key={p.id}
-              onClick={() => setSelectedPlanId(p.id)}
+              onClick={() => {
+                setSelectedPlanId(p.id);
+                setExpandedGroupId(null);
+              }}
               style={{
                 padding: "10px 12px", borderRadius: 8, marginBottom: 6,
                 background: selectedPlanId === p.id ? "rgba(59,130,246,0.12)" : "#1e293b",
@@ -205,20 +209,27 @@ export default function RoutingPlans() {
                       </span>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {items.map((g) => (
-                        <RoutingPlanGroup
-                          key={`${key}:${g.path}`}
-                          planId={selectedPlanId}
-                          groupKey={key}
-                          group={g}
-                          destinations={destinations}
-                          allowActions={
-                            key === "ready_to_approve"
-                            || key === "needs_review"
-                            || key === "trash_candidates"
-                          }
-                        />
-                      ))}
+                      {items.map((g) => {
+                        const groupId = `${key}:${g.bucket_id ?? g.path}`;
+                        return (
+                          <RoutingPlanGroup
+                            key={groupId}
+                            planId={selectedPlanId}
+                            groupKey={key}
+                            group={g}
+                            destinations={destinations}
+                            allowActions={
+                              key === "ready_to_approve"
+                              || key === "needs_review"
+                              || key === "trash_candidates"
+                            }
+                            expanded={expandedGroupId === groupId}
+                            onToggle={() => setExpandedGroupId((current) => (
+                              current === groupId ? null : groupId
+                            ))}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 );

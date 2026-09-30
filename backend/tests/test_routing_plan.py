@@ -186,7 +186,7 @@ def test_approve_and_reject_groups(db):
     assert items[2].status == "rejected"
 
 
-def test_reject_does_not_overwrite_reviewed_items(db):
+def test_bulk_actions_only_change_pending_items(db):
     _clean(db)
     tree = RoutingTreeService(db, TEST_USER_ID)
     bucket = tree.create_node(RoutingNodeCreate(name="A"))
@@ -204,14 +204,39 @@ def test_reject_does_not_overwrite_reviewed_items(db):
         decision=_make_decision(bucket.id, "A", review=True),
         ai_metadata={},
     )
+    pending_approve = plan_svc.add_item(
+        plan,
+        asset_id="pending-approve-asset",
+        decision=_make_decision(bucket.id, "A", review=True),
+        ai_metadata={},
+    )
+    pending_reject = plan_svc.add_item(
+        plan,
+        asset_id="pending-reject-asset",
+        decision=_make_decision(bucket.id, "A", review=True),
+        ai_metadata={},
+    )
     plan_svc.approve_items([approved.id])
     plan_svc.reject_items([rejected.id])
 
-    assert plan_svc.reject_items([approved.id, rejected.id]) == 0
+    assert plan_svc.approve_items([
+        approved.id,
+        rejected.id,
+        pending_approve.id,
+    ]) == 1
+    assert plan_svc.reject_items([
+        approved.id,
+        rejected.id,
+        pending_reject.id,
+    ]) == 1
     db.refresh(approved)
     db.refresh(rejected)
+    db.refresh(pending_approve)
+    db.refresh(pending_reject)
     assert approved.status == "approved"
     assert rejected.status == "rejected"
+    assert pending_approve.status == "approved"
+    assert pending_reject.status == "rejected"
 
 
 def test_group_item_pagination_returns_exact_group(db):

@@ -25,6 +25,8 @@ interface Props {
   group: RoutingPlanGroupItem;
   destinations: RoutingNode[];
   allowActions: boolean;
+  expanded: boolean;
+  onToggle: () => void;
 }
 
 function locationText(location: Record<string, unknown> | null | undefined): string {
@@ -192,9 +194,10 @@ export default function RoutingPlanGroup({
   group,
   destinations,
   allowActions,
+  expanded,
+  onToggle,
 }: Props) {
   const qc = useQueryClient();
-  const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const totalPages = Math.max(1, Math.ceil(group.count / PAGE_SIZE));
@@ -252,13 +255,13 @@ export default function RoutingPlanGroup({
       <div className={styles.header}>
         <button
           className={styles.expand}
-          onClick={() => setExpanded((value) => !value)}
+          onClick={onToggle}
           aria-expanded={expanded}
           aria-label={`${expanded ? "Collapse" : "Expand"} ${group.path}`}
         >
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
-        <button className={styles.title} onClick={() => setExpanded((value) => !value)}>
+        <button className={styles.title} onClick={onToggle}>
           <strong>{group.path}</strong>
           <span>{group.count} photos</span>
         </button>
