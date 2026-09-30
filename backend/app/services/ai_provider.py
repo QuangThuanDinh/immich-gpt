@@ -108,6 +108,8 @@ class OpenAIProvider(AIProvider):
     ):
         self.verification_skipped = False
         if azure_api_version or azure_deployment:
+            if not api_key:
+                raise ValueError("Azure OpenAI requires an API key")
             if not base_url or not azure_deployment:
                 raise ValueError(
                     "Azure OpenAI requires Base URL and Deployment"
@@ -287,15 +289,20 @@ class OpenRouterProvider(AIProvider):
     def health_check(self) -> bool:
         try:
             import httpx
+            path = (
+                "auth/key"
+                if self.base_url == f"{OPENROUTER_DEFAULT_ORIGIN}/api/v1"
+                else "models"
+            )
             r = httpx.get(
-                f"{self.base_url}/models",
+                f"{self.base_url}/{path}",
                 headers={
                     "Authorization": f"Bearer {self._api_key}",
                     **self._extra_headers,
                 },
                 timeout=10,
             )
-            return r.status_code in (200, 401)
+            return r.status_code == 200
         except Exception:
             return False
 

@@ -6,6 +6,7 @@ import pytest
 from app.config import settings
 from app.services.ai_provider import (
     OpenAIProvider,
+    OpenRouterProvider,
     get_openrouter_api_base_url,
     build_provider,
 )
@@ -85,6 +86,15 @@ def test_versioned_azure_openai_uses_azure_client():
     assert provider.verification_skipped is True
 
 
+def test_azure_openai_rejects_missing_api_key():
+    with pytest.raises(ValueError, match="requires an API key"):
+        OpenAIProvider(
+            "",
+            base_url="https://resource.openai.azure.com",
+            azure_deployment="vision-deployment",
+        )
+
+
 def test_openrouter_uses_default_api_base():
     public_address = [
         (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
@@ -95,6 +105,34 @@ def test_openrouter_uses_default_api_base():
             build_provider("openrouter", {"api_key": "key"})
 
     assert openai.call_args.kwargs["base_url"] == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_health_check_rejects_unauthorized_response():
+    public_address = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+    ]
+
+    with patch("app.services.url_validation.socket.getaddrinfo", return_value=public_address):
+        with patch("openai.OpenAI"):
+            provider = OpenRouterProvider("invalid-key")
+    with patch("httpx.get") as http_get:
+        http_get.return_value.status_code = 401
+        assert provider.health_check() is False
+    assert http_get.call_args.args[0] == "https://openrouter.ai/api/v1/auth/key"
+
+
+def test_custom_openrouter_health_check_uses_models(monkeypatch):
+    monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
+
+    with patch("openai.OpenAI"):
+        provider = OpenRouterProvider(
+            "key",
+            base_url="http://192.168.0.19:4000",
+        )
+    with patch("httpx.get") as http_get:
+        http_get.return_value.status_code = 200
+        assert provider.health_check() is True
+    assert http_get.call_args.args[0] == "http://192.168.0.19:4000/api/v1/models"
 
 
 def test_openrouter_appends_api_path_to_custom_origin(monkeypatch):
