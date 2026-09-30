@@ -10,7 +10,7 @@ import {
   X, Star, Archive, ExternalLink, Camera, MapPin, Tag, Calendar, Clock,
 } from "lucide-react";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 100;
 
 type SortKey = "date" | "filename" | "location" | "tags" | "type";
 type SortDir = "asc" | "desc";
@@ -282,7 +282,7 @@ export default function Assets() {
   }
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 1400, margin: "0 auto" }}>
+    <div data-testid="assets-page" style={{ padding: "32px 40px", maxWidth: 1952, margin: "0 auto" }}>
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Assets</h1>
         <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>
@@ -327,7 +327,7 @@ export default function Assets() {
           No assets match the current filter. Sync your Immich library from the dashboard.
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+        <div data-testid="assets-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
           {assets.map((asset) => (
             <AssetCard
               key={asset.id}

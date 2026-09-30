@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -52,5 +52,20 @@ describe("Assets page", () => {
     const image = await screen.findByRole("img", { name: "photo.jpg" });
     expect(image).toHaveAttribute("loading", "lazy");
     expect(image).toHaveAttribute("decoding", "async");
+  });
+
+  it("requests 100 assets and allows a ten-card-wide grid", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(getAssets).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1, page_size: 100 })
+      );
+    });
+    expect(screen.getByTestId("assets-page")).toHaveStyle({ maxWidth: "1952px" });
+    expect(await screen.findByTestId("assets-grid")).toHaveStyle({
+      gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+      gap: "12px",
+    });
   });
 });
