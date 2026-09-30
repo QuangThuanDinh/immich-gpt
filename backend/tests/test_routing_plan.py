@@ -1,6 +1,7 @@
 """RoutingPlanService and routing API tests."""
 import uuid
 import pytest
+from contextlib import nullcontext
 from datetime import datetime
 from unittest.mock import MagicMock
 from app.models.asset import Asset
@@ -88,6 +89,40 @@ def test_process_asset_stops_when_image_preparation_fails(db):
 
     with pytest.raises(RuntimeError, match="thumbnail unavailable"):
         orchestrator._process_asset(asset, [], None, "job-id")
+
+
+def test_classification_rolls_back_before_logging_asset_failure(db):
+    orchestrator = _make_orchestrator(db)
+    asset = _make_asset(db, "failed-asset")
+    plan = MagicMock(id="plan-id", status="draft")
+    job = MagicMock(status="running")
+    orchestrator.tree_service.get_enabled_leaves = MagicMock(
+        return_value=[MagicMock()]
+    )
+    orchestrator.plan_service.create_plan = MagicMock(return_value=plan)
+    orchestrator._load_assets = MagicMock(return_value=[asset])
+    orchestrator._process_asset = MagicMock(
+        side_effect=RuntimeError("original database failure")
+    )
+    orchestrator._apply_auto_apply_items = MagicMock()
+    orchestrator.job_service = MagicMock()
+    orchestrator.job_service.defer_commits.return_value = nullcontext()
+    orchestrator.job_service.get_job.return_value = job
+    original_rollback = db.rollback
+    db.rollback = MagicMock(wraps=original_rollback)
+
+    def assert_rollback_before_error_log(*args, **kwargs):
+        if kwargs.get("error_delta"):
+            assert db.rollback.called
+            assert "original database failure" in kwargs["log_line"]
+
+    orchestrator.job_service.update_progress.side_effect = (
+        assert_rollback_before_error_log
+    )
+
+    assert orchestrator.run_classification_job("job-id") == "plan-id"
+    db.rollback.assert_called_once()
+    orchestrator.job_service.complete_job.assert_called_once()
 
 
 def test_plan_groups_items_by_destination(db):

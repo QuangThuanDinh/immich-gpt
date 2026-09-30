@@ -107,6 +107,7 @@ class RoutingClassificationOrchestrator:
 
         with self.job_service.defer_commits():
             for idx, asset in enumerate(assets):
+                asset_immich_id = asset.immich_id
                 current = self.job_service.get_job(job_id)
                 if current and current.status == "paused":
                     self.job_service.update_progress(
@@ -123,18 +124,20 @@ class RoutingClassificationOrchestrator:
                     job_id,
                     status="classifying_ai",
                     processed=idx,
-                    log_line=f"Routing asset {idx + 1}/{total}: {asset.immich_id}",
+                    log_line=f"Routing asset {idx + 1}/{total}: {asset_immich_id}",
                 )
                 try:
                     self._process_asset(asset, leaves, plan, job_id)
                     self.job_service.update_progress(
                         job_id, processed=idx + 1, success_delta=1,
-                        log_line=f"\u2713 Asset {asset.immich_id} routed",
+                        log_line=f"\u2713 Asset {asset_immich_id} routed",
                     )
                 except Exception as e:  # pragma: no cover - defensive
+                    error_message = str(e)[:200]
+                    self.db.rollback()
                     self.job_service.update_progress(
                         job_id, processed=idx + 1, error_delta=1,
-                        log_line=f"\u2717 Routing error for {asset.immich_id}: {str(e)[:200]}",
+                        log_line=f"\u2717 Routing error for {asset_immich_id}: {error_message}",
                     )
 
         plan.status = "ready"
