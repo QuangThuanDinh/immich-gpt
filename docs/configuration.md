@@ -63,6 +63,7 @@ These variables are primarily used by `.env.example` and `docker-compose.yml`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:///./data/immich_gpt.db` | Database URL for local or non-container runs |
+| `ALLOW_PRIVATE_SERVICE_URLS` | `false` | Set `true` to allow Immich or AI provider URLs that resolve to private/LAN addresses |
 | `ROUTING_PLAN_PAGE_SIZE` | `20` | Photos shown per Routing Plan review page (1–100) |
 | `SECRET_KEY` | none | Session-signing secret; must be strong and at least 32 characters if set directly |
 | `SESSION_COOKIE_NAME` | `session_id` | Name of the session cookie |
@@ -72,6 +73,22 @@ These variables are primarily used by `.env.example` and `docker-compose.yml`.
 | `LOG_LEVEL` | `INFO` | Root logger level |
 | `RATELIMIT_ENABLED` | `true` | Enables API rate limiting |
 | `DEBUG` | `false` | Backend debug flag |
+
+### Local services and Routing Plan page size
+
+Use these settings when Immich, Ollama, LiteLLM, or another configured service
+is hosted on your local network, and to control the number of photos loaded on
+each Routing Plan review page:
+
+```env
+ALLOW_PRIVATE_SERVICE_URLS=true
+ROUTING_PLAN_PAGE_SIZE=20
+```
+
+`ALLOW_PRIVATE_SERVICE_URLS` defaults to `false` to protect against
+server-side request forgery. Enable it only when the configured private or LAN
+services are trusted. `ROUTING_PLAN_PAGE_SIZE` accepts values from `1` through
+`100` and defaults to `20`.
 
 ## Immich and provider defaults
 

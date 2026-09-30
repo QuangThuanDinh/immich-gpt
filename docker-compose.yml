@@ -46,10 +46,12 @@ services:
       # Optional here — can also be configured per-user in the web UI.
       IMMICH_URL: ${IMMICH_URL:-}
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+      # Required when Immich or an AI provider resolves to a private/LAN IP.
       ALLOW_PRIVATE_SERVICE_URLS: ${ALLOW_PRIVATE_SERVICE_URLS:-false}
       # ── AI provider ────────────────────────────────────────────────────
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      # Number of photos per page in Routing Plan review (1-100).
       ROUTING_PLAN_PAGE_SIZE: ${ROUTING_PLAN_PAGE_SIZE:-20}
       # ── Authentication ─────────────────────────────────────────────────
       # The first admin account is created via the web setup wizard on first visit.
