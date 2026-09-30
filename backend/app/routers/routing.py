@@ -335,7 +335,7 @@ def plan_items(
     group_key: Optional[str] = None,
     path: Optional[str] = None,
     page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user=Depends(require_active_user),
 ):

@@ -474,7 +474,7 @@ describe("Routing plans page", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 
-  it("paginates expanded groups in pages of 100", async () => {
+  it("paginates expanded groups in pages of 50", async () => {
     plansMock.mockResolvedValue([
       { id: "p1", job_id: null, status: "ready", item_count: 101,
         created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
@@ -492,16 +492,16 @@ describe("Routing plans page", () => {
     fireEvent.click(await screen.findByText(/ready ·/i));
     fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
 
-    expect(await screen.findByText("Page 1 of 2")).toBeInTheDocument();
+    expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(planItemsMock).toHaveBeenLastCalledWith(
       "p1",
-      expect.objectContaining({ page: 2, page_size: 100 })
+      expect.objectContaining({ page: 2, page_size: 50 })
     ));
     fireEvent.click(screen.getByRole("button", { name: "Previous" }));
     await waitFor(() => expect(planItemsMock).toHaveBeenLastCalledWith(
       "p1",
-      expect.objectContaining({ page: 1, page_size: 100 })
+      expect.objectContaining({ page: 1, page_size: 50 })
     ));
   });
 

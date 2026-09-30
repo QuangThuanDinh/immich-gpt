@@ -17,7 +17,7 @@ import type {
 import Thumbnail from "./Thumbnail";
 import styles from "./RoutingPlanGroup.module.css";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
 
 interface Props {
   planId: string;

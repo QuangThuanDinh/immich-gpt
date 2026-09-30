@@ -135,7 +135,7 @@ class RoutingPlanService:
         plan_id: str,
         group_key: str,
         page: int = 1,
-        page_size: int = 100,
+        page_size: int = 50,
         bucket_id: Optional[str] = None,
         path: Optional[str] = None,
     ) -> List[RoutingPlanItem]:
