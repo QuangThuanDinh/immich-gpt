@@ -1,4 +1,4 @@
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 from typing import List
 
@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # Number of background job threads (in-process executor).
     # Ignored when REDIS_URL is set.
     WORKER_CONCURRENCY: int = 2
+    ROUTING_PLAN_PAGE_SIZE: int = Field(default=20, ge=1, le=100)
 
     # Immich
     IMMICH_URL: str = ""

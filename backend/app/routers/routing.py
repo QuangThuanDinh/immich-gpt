@@ -8,6 +8,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..database import get_db
 from ..dependencies import require_active_user
 from ..models.bucket import Bucket
@@ -335,7 +336,7 @@ def plan_items(
     group_key: Optional[str] = None,
     path: Optional[str] = None,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(settings.ROUTING_PLAN_PAGE_SIZE, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user=Depends(require_active_user),
 ):

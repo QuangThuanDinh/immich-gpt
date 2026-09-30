@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, LoaderCircle } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, LoaderCircle, X } from "lucide-react";
 import {
   approveRoutingPlanItems,
   getRoutingPlanItems,
@@ -17,7 +17,6 @@ import type {
 import Thumbnail from "./Thumbnail";
 import styles from "./RoutingPlanGroup.module.css";
 
-const PAGE_SIZE = 50;
 const ACTION_BATCH_SIZE = 10;
 
 type ReviewAction = "approve" | "reject";
@@ -29,6 +28,7 @@ interface Props {
   group: RoutingPlanGroupItem;
   destinations: RoutingNode[];
   allowActions: boolean;
+  pageSize: number;
   expanded: boolean;
   onToggle: () => void;
 }
@@ -189,15 +189,27 @@ function ReviewItem({
         <span className={styles.status}>{item.status}</span>
         {editable && (
           <>
-            <button className={styles.approve} disabled={busy} onClick={() => void review("approve")}>
+            <button
+              className={styles.approve}
+              disabled={busy}
+              onClick={() => void review("approve")}
+              aria-label={reviewAction === "approve" ? "Processing approval" : "Approve"}
+              title="Approve"
+            >
               {reviewAction === "approve" ? (
-                <span className={styles.buttonContent}><LoaderCircle className={styles.spinner} size={12} />Processing...</span>
-              ) : "Approve"}
+                <LoaderCircle className={styles.spinner} size={14} />
+              ) : <Check size={14} />}
             </button>
-            <button className={styles.reject} disabled={busy} onClick={() => void review("reject")}>
+            <button
+              className={styles.reject}
+              disabled={busy}
+              onClick={() => void review("reject")}
+              aria-label={reviewAction === "reject" ? "Processing rejection" : "Reject"}
+              title="Reject"
+            >
               {reviewAction === "reject" ? (
-                <span className={styles.buttonContent}><LoaderCircle className={styles.spinner} size={12} />Processing...</span>
-              ) : "Reject"}
+                <LoaderCircle className={styles.spinner} size={14} />
+              ) : <X size={14} />}
             </button>
           </>
         )}
@@ -214,6 +226,7 @@ export default function RoutingPlanGroup({
   group,
   destinations,
   allowActions,
+  pageSize,
   expanded,
   onToggle,
 }: Props) {
@@ -226,7 +239,7 @@ export default function RoutingPlanGroup({
     total: number;
   } | null>(null);
   const [actionError, setActionError] = useState(false);
-  const totalPages = Math.max(1, Math.ceil(group.count / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(group.count / pageSize));
   const queryKey = [
     "routing-plan-items",
     planId,
@@ -247,7 +260,7 @@ export default function RoutingPlanGroup({
       bucket_id: group.bucket_id ?? undefined,
       path: group.bucket_id ? undefined : (group.path === "(no destination)" ? undefined : group.path),
       page,
-      page_size: PAGE_SIZE,
+      page_size: pageSize,
     }),
     enabled: expanded,
   });

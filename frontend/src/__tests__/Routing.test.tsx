@@ -484,13 +484,13 @@ describe("Routing plans page", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 
-  it("paginates expanded groups in pages of 50", async () => {
+  it("uses the page size supplied by the backend", async () => {
     plansMock.mockResolvedValue([
       { id: "p1", job_id: null, status: "ready", item_count: 101,
         created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
     ]);
     planSummaryMock.mockResolvedValue({
-      plan_id: "p1", total: 101,
+      plan_id: "p1", total: 101, page_size: 25,
       groups: {
         auto_applied: [],
         ready_to_approve: [{ path: "Personal", bucket_id: "b1", count: 101, item_ids: [] }],
@@ -502,16 +502,16 @@ describe("Routing plans page", () => {
     fireEvent.click(await screen.findByText(/ready ·/i));
     fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
 
-    expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
+    expect(await screen.findByText("Page 1 of 5")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(planItemsMock).toHaveBeenLastCalledWith(
       "p1",
-      expect.objectContaining({ page: 2, page_size: 50 })
+      expect.objectContaining({ page: 2, page_size: 25 })
     ));
     fireEvent.click(screen.getByRole("button", { name: "Previous" }));
     await waitFor(() => expect(planItemsMock).toHaveBeenLastCalledWith(
       "p1",
-      expect.objectContaining({ page: 1, page_size: 50 })
+      expect.objectContaining({ page: 1, page_size: 25 })
     ));
   });
 
@@ -575,9 +575,11 @@ describe("Routing plans page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
 
-    expect(await screen.findByText("Processing...")).toBeInTheDocument();
+    const processingButton = await screen.findByRole("button", { name: "Processing approval" });
+    expect(processingButton).toBeDisabled();
+    expect(processingButton.querySelector("svg")).toBeInTheDocument();
     action.resolve({ approved: 1 });
-    await waitFor(() => expect(screen.queryByText("Processing...")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Processing approval" })).not.toBeInTheDocument());
   });
 
   it("shows completed and total progress for batched group actions", async () => {

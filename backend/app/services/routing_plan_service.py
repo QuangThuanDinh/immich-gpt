@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..models.routing_plan import RoutingPlan, RoutingPlanItem
 from ..models.bucket import Bucket
 from .routing_decision import RoutingDecision
@@ -135,7 +136,7 @@ class RoutingPlanService:
         plan_id: str,
         group_key: str,
         page: int = 1,
-        page_size: int = 50,
+        page_size: int = settings.ROUTING_PLAN_PAGE_SIZE,
         bucket_id: Optional[str] = None,
         path: Optional[str] = None,
     ) -> List[RoutingPlanItem]:
@@ -191,6 +192,7 @@ class RoutingPlanService:
         return {
             "plan_id": plan_id,
             "total": total,
+            "page_size": settings.ROUTING_PLAN_PAGE_SIZE,
             "writeback": self._writeback_summary(items),
             "groups": {
                 k: list(v.values()) for k, v in groups.items()

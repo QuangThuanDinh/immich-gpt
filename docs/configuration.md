@@ -63,6 +63,7 @@ These variables are primarily used by `.env.example` and `docker-compose.yml`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:///./data/immich_gpt.db` | Database URL for local or non-container runs |
+| `ROUTING_PLAN_PAGE_SIZE` | `20` | Photos shown per Routing Plan review page (1–100) |
 | `SECRET_KEY` | none | Session-signing secret; must be strong and at least 32 characters if set directly |
 | `SESSION_COOKIE_NAME` | `session_id` | Name of the session cookie |
 | `SESSION_COOKIE_SECURE` | `false` | Must be `true` for HTTPS deployments; leave `false` for plain HTTP |

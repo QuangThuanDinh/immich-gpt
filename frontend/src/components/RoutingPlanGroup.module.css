@@ -177,20 +177,31 @@
 }
 
 .itemActions {
-  width: 112px;
-  flex-direction: column;
+  width: 64px;
+  flex-wrap: wrap;
   justify-content: center;
   padding-right: 12px;
 }
 
 .itemActions button {
-  width: 100%;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  padding: 0;
 }
 
 .status {
+  flex-basis: 100%;
   color: #94a3b8;
   font-size: 10px;
+  text-align: center;
   text-transform: capitalize;
+}
+
+.itemActions .error {
+  flex-basis: 100%;
+  padding: 0;
 }
 
 .message,

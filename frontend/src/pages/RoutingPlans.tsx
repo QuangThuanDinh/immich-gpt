@@ -223,6 +223,7 @@ export default function RoutingPlans() {
                               || key === "needs_review"
                               || key === "trash_candidates"
                             }
+                            pageSize={summary.page_size ?? 20}
                             expanded={expandedGroupId === groupId}
                             onToggle={() => setExpandedGroupId((current) => (
                               current === groupId ? null : groupId

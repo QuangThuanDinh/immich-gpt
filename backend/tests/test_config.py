@@ -126,6 +126,34 @@ class TestCookieSecurityDefaults:
 
 
 # ---------------------------------------------------------------------------
+# Routing review defaults
+# ---------------------------------------------------------------------------
+
+class TestRoutingPlanPageSize:
+    def test_defaults_to_twenty(self):
+        settings = _make_settings(
+            SECRET_KEY="a" * 64,
+            ROUTING_PLAN_PAGE_SIZE=None,
+        )
+        assert settings.ROUTING_PLAN_PAGE_SIZE == 20
+
+    def test_accepts_environment_override(self):
+        settings = _make_settings(
+            SECRET_KEY="a" * 64,
+            ROUTING_PLAN_PAGE_SIZE="40",
+        )
+        assert settings.ROUTING_PLAN_PAGE_SIZE == 40
+
+    @pytest.mark.parametrize("value", ["0", "101"])
+    def test_rejects_out_of_range_values(self, value):
+        with pytest.raises(ValidationError):
+            _make_settings(
+                SECRET_KEY="a" * 64,
+                ROUTING_PLAN_PAGE_SIZE=value,
+            )
+
+
+# ---------------------------------------------------------------------------
 # Cookie flags applied to login response
 # ---------------------------------------------------------------------------
 

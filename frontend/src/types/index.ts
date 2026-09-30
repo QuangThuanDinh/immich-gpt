@@ -198,6 +198,7 @@ export interface RoutingPlanGroupItem {
 export interface RoutingPlanSummary {
   plan_id: string;
   total: number;
+  page_size?: number;
   writeback?: {
     write_description: number;
     write_tags: number;

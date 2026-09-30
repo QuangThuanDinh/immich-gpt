@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from datetime import datetime
 from unittest.mock import MagicMock
 from app.models.asset import Asset
+from app.config import settings
 from app.services.routing_plan_service import RoutingPlanService
 from app.services.routing_tree import RoutingTreeService
 from app.services.routing_classification import RoutingClassificationOrchestrator
@@ -150,6 +151,7 @@ def test_plan_groups_items_by_destination(db):
 
     summary = plan_svc.summarize(plan.id)
     assert summary["total"] == 5
+    assert summary["page_size"] == settings.ROUTING_PLAN_PAGE_SIZE
     ready = {g["path"]: g["count"] for g in summary["groups"]["ready_to_approve"]}
     needs = {g["path"]: g["count"] for g in summary["groups"]["needs_review"]}
     assert ready.get("A") == 3
