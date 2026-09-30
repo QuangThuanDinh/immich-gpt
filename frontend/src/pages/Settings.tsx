@@ -729,7 +729,7 @@ function AboutSection() {
 
 export default function Settings() {
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 700 }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Settings</h1>
         <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>

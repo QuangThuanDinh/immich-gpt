@@ -66,7 +66,7 @@ export default function AdminUsers() {
   });
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 900 }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>User Management</h1>

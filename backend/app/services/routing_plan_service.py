@@ -80,12 +80,7 @@ class RoutingPlanService:
     ) -> RoutingPlanItem:
         primary = decision.primary
 
-        if decision.auto_apply:
-            status = "approved"
-        elif decision.review_required:
-            status = "pending"
-        else:
-            status = "approved"
+        status = "approved" if decision.auto_apply else "pending"
 
         item = RoutingPlanItem(
             id=str(uuid.uuid4()),
@@ -261,8 +256,9 @@ class RoutingPlanService:
         items = self.list_items_by_ids(item_ids, plan_id=plan_id)
         count = 0
         for item in items:
-            if item.status in ("pending",):
+            if item.status in ("pending", "failed"):
                 item.status = "approved"
+                item.error_message = None
                 count += 1
         self.db.commit()
         return count
@@ -271,8 +267,9 @@ class RoutingPlanService:
         items = self.list_items_by_ids(item_ids, plan_id=plan_id)
         count = 0
         for item in items:
-            if item.status == "pending":
+            if item.status in ("pending", "failed"):
                 item.status = "rejected"
+                item.error_message = None
                 count += 1
         self.db.commit()
         return count
@@ -294,8 +291,8 @@ class RoutingPlanService:
         )
         if not item:
             raise ValueError("Routing plan item not found")
-        if item.status != "pending":
-            raise ValueError("Only pending routing plan items can be edited")
+        if item.status not in ("pending", "failed"):
+            raise ValueError("Only pending or failed routing plan items can be edited")
 
         if "primary_bucket_id" in updates:
             bucket_id = updates.pop("primary_bucket_id")

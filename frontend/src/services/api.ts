@@ -147,6 +147,9 @@ export const getAssets = (params?: {
   dir?: string;
 }) => api.get("/assets", { params }).then((r) => r.data as Asset[]);
 
+export const getAsset = (assetId: string): Promise<Asset> =>
+  api.get(`/assets/${assetId}`).then((r) => r.data);
+
 export const getAssetCount = (params?: {
   asset_type?: string;
   q?: string;

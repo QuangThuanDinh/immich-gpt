@@ -32,6 +32,7 @@ vi.mock("../services/api", async (importOriginal) => {
     getRoutingPreferences: vi.fn().mockResolvedValue({ learn_from_corrections: false }),
     saveRoutingPreferences: noop,
     getAssets: vi.fn().mockResolvedValue([]),
+    getAsset: noop,
     getAssetCount: vi.fn().mockResolvedValue({ count: 0 }),
     getAllAssetIds: vi.fn().mockResolvedValue({ ids: [] }),
     getJobs: vi.fn().mockResolvedValue([]),

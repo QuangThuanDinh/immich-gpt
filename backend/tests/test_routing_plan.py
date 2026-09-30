@@ -229,6 +229,90 @@ def test_plan_approve_reports_writeback_failure(client, db, monkeypatch):
     assert item.error_message == "Failed to write tags"
 
 
+def test_plan_approve_retries_failed_item(client, db, monkeypatch):
+    from app.routers import routing
+
+    plan = RoutingPlan(
+        id="retry-failed-plan",
+        user_id=TEST_USER_ID,
+        status="partially_applied",
+    )
+    item = RoutingPlanItem(
+        id="failed-item",
+        user_id=TEST_USER_ID,
+        plan_id=plan.id,
+        asset_id="local-asset-id",
+        status="failed",
+        error_message="Previous failure",
+    )
+    db.add_all([plan, item])
+    db.commit()
+    writeback = MagicMock()
+    writeback.apply_item.return_value = SimpleNamespace(errors=[])
+    monkeypatch.setattr(
+        routing,
+        "_get_user_immich_client",
+        lambda *_: object(),
+    )
+    monkeypatch.setattr(
+        routing,
+        "RoutingWritebackService",
+        MagicMock(return_value=writeback),
+    )
+
+    response = client.post(
+        f"/api/routing/plans/{plan.id}/approve",
+        json={"item_ids": [item.id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"approved": 1, "applied": 1, "failed": 0}
+    db.refresh(item)
+    assert item.status == "applied"
+    assert item.error_message is None
+    writeback.apply_item.assert_called_once()
+
+
+def test_plan_reject_finalizes_failed_item_without_writeback(
+    client,
+    db,
+    monkeypatch,
+):
+    from app.routers import routing
+
+    plan = RoutingPlan(
+        id="reject-failed-plan",
+        user_id=TEST_USER_ID,
+        status="partially_applied",
+    )
+    item = RoutingPlanItem(
+        id="failed-rejection-item",
+        user_id=TEST_USER_ID,
+        plan_id=plan.id,
+        asset_id="local-asset-id",
+        status="failed",
+        error_message="Previous failure",
+    )
+    db.add_all([plan, item])
+    db.commit()
+    client_factory = MagicMock(side_effect=AssertionError(
+        "Reject must not connect to Immich"
+    ))
+    monkeypatch.setattr(routing, "_get_user_immich_client", client_factory)
+
+    response = client.post(
+        f"/api/routing/plans/{plan.id}/reject",
+        json={"item_ids": [item.id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"rejected": 1}
+    db.refresh(item)
+    assert item.status == "rejected"
+    assert item.error_message is None
+    client_factory.assert_not_called()
+
+
 def test_plan_reject_is_immediate_without_immich_writeback(
     client,
     db,
@@ -342,6 +426,33 @@ def test_plan_groups_items_by_destination(db):
     needs = {g["path"]: g["count"] for g in summary["groups"]["needs_review"]}
     assert ready.get("A") == 3
     assert needs.get("B") == 2
+    assert {
+        item.status for item in plan_svc.list_items(plan.id)
+    } == {"pending"}
+
+
+def test_only_auto_apply_decisions_start_approved(db):
+    _clean(db)
+    tree = RoutingTreeService(db, TEST_USER_ID)
+    bucket = tree.create_node(RoutingNodeCreate(name="A"))
+    plan_svc = RoutingPlanService(db, TEST_USER_ID)
+    plan = plan_svc.create_plan()
+
+    manual = plan_svc.add_item(
+        plan,
+        asset_id="manual-asset",
+        decision=_make_decision(bucket.id, "A", review=False, auto=False),
+        ai_metadata={},
+    )
+    automatic = plan_svc.add_item(
+        plan,
+        asset_id="automatic-asset",
+        decision=_make_decision(bucket.id, "A", review=False, auto=True),
+        ai_metadata={},
+    )
+
+    assert manual.status == "pending"
+    assert automatic.status == "approved"
 
 
 def test_plan_summary_lists_enabled_writeback_operations(db):

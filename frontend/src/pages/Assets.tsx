@@ -5,9 +5,10 @@ import {
   getAssets, getAssetCount, getThumbnailUrl,
 } from "../services/api";
 import type { Asset } from "../types";
+import AssetDetailPanel from "../components/AssetDetailPanel";
 import {
   Search, Image as ImageIcon, ArrowUp, ArrowDown, ArrowUpDown,
-  X, Star, Archive, ExternalLink, Camera, MapPin, Tag, Calendar, Clock,
+  Star,
 } from "lucide-react";
 
 const PAGE_SIZE = 100;
@@ -30,132 +31,6 @@ function SortHeader({ label, sortKey, current, dir, onChange }: {
       {label}
       {active ? (dir === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />) : <ArrowUpDown size={11} />}
     </button>
-  );
-}
-
-function MetaRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
-  if (!value) return null;
-  return (
-    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "7px 0", borderBottom: "1px solid #1e293b" }}>
-      <div style={{ color: "#475569", flexShrink: 0, marginTop: 1 }}>{icon}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 11, color: "#475569", fontWeight: 500, marginBottom: 2 }}>{label}</div>
-        <div style={{ fontSize: 13, color: "#e2e8f0", wordBreak: "break-word" }}>{value}</div>
-      </div>
-    </div>
-  );
-}
-
-function AssetDetailPanel({ asset, onClose }: { asset: Asset; onClose: () => void }) {
-  const [imgError, setImgError] = React.useState(false);
-
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  const location = [asset.city, asset.country].filter(Boolean).join(", ");
-
-  return (
-    <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200 }} />
-      <div style={{
-        position: "fixed", top: 0, right: 0, bottom: 0,
-        width: "min(480px, 100vw)",
-        background: "#0f172a", borderLeft: "1px solid #334155",
-        zIndex: 201, display: "flex", flexDirection: "column", overflow: "hidden",
-      }}>
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "16px 20px", borderBottom: "1px solid #1e293b", flexShrink: 0,
-        }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, marginRight: 12 }}>
-            {asset.original_filename || asset.immich_id}
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", padding: 4 }}>
-            <X size={18} />
-          </button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          <div style={{ background: "#000", position: "relative", aspectRatio: "16/9", overflow: "hidden", flexShrink: 0 }}>
-            {imgError ? (
-              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <ImageIcon size={48} color="#334155" />
-              </div>
-            ) : (
-              <img
-                src={getThumbnailUrl(asset.id, "preview")}
-                alt={asset.original_filename || ""}
-                decoding="async"
-                onError={() => setImgError(true)}
-                style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
-              />
-            )}
-            <div style={{ position: "absolute", top: 8, left: 8, display: "flex", gap: 6 }}>
-              {asset.is_favorite && (
-                <span style={{ background: "rgba(0,0,0,0.6)", borderRadius: 6, padding: "3px 7px", display: "flex", alignItems: "center", gap: 4 }}>
-                  <Star size={11} color="#fbbf24" fill="#fbbf24" />
-                </span>
-              )}
-              {asset.is_archived && (
-                <span style={{ background: "rgba(0,0,0,0.6)", borderRadius: 6, padding: "3px 7px", display: "flex", alignItems: "center", gap: 4 }}>
-                  <Archive size={11} color="#94a3b8" />
-                </span>
-              )}
-              {asset.is_external_library && (
-                <span style={{ background: "rgba(0,0,0,0.6)", borderRadius: 6, padding: "3px 7px", display: "flex", alignItems: "center", gap: 4 }}>
-                  <ExternalLink size={11} color="#94a3b8" />
-                </span>
-              )}
-            </div>
-            {asset.asset_type && (
-              <span style={{
-                position: "absolute", bottom: 8, right: 8,
-                background: "rgba(0,0,0,0.6)", borderRadius: 6, padding: "3px 8px",
-                fontSize: 11, fontWeight: 600, color: "#38bdf8",
-              }}>
-                {asset.asset_type}
-              </span>
-            )}
-          </div>
-
-          <div style={{ padding: "16px 20px" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-              Metadata
-            </div>
-            <MetaRow icon={<Calendar size={13} />} label="Date taken" value={asset.file_created_at ? new Date(asset.file_created_at).toLocaleString() : null} />
-            <MetaRow icon={<MapPin size={13} />} label="Location" value={location || null} />
-            <MetaRow icon={<Camera size={13} />} label="Camera" value={[asset.camera_make, asset.camera_model].filter(Boolean).join(" ") || null} />
-            {asset.description && <MetaRow icon={<Tag size={13} />} label="Description" value={asset.description} />}
-            {(asset.tags ?? []).length > 0 && (
-              <MetaRow
-                icon={<Tag size={13} />}
-                label="Tags"
-                value={
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
-                    {(asset.tags ?? []).map((t) => (
-                      <span key={t} style={{ fontSize: 11, background: "#1e293b", border: "1px solid #334155", borderRadius: 5, padding: "2px 8px", color: "#94a3b8" }}>
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                }
-              />
-            )}
-            {(asset.album_ids ?? []).length > 0 && (
-              <MetaRow icon={<Tag size={13} />} label="Albums" value={`${asset.album_ids!.length} album${asset.album_ids!.length !== 1 ? "s" : ""}`} />
-            )}
-            <MetaRow icon={<Tag size={13} />} label="MIME type" value={asset.mime_type ?? null} />
-            <MetaRow icon={<Clock size={13} />} label="Synced at" value={asset.synced_at ? new Date(asset.synced_at).toLocaleString() : null} />
-            <MetaRow icon={<Tag size={13} />} label="Immich ID" value={
-              <span style={{ fontFamily: "monospace", fontSize: 11, color: "#64748b" }}>{asset.immich_id}</span>
-            } />
-          </div>
-        </div>
-      </div>
-    </>
   );
 }
 
@@ -360,9 +235,10 @@ export default function Assets() {
         </div>
       )}
 
-      {selected && (
+      {selectedAssetId && (
         <AssetDetailPanel
-          asset={selected}
+          assetId={selectedAssetId}
+          initialAsset={selected}
           onClose={() => setSelectedAssetId(null)}
         />
       )}

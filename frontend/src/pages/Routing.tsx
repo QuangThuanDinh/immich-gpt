@@ -258,7 +258,7 @@ export default function Routing() {
   };
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 1400, margin: "0 auto" }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1952, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Routing tree</h1>
@@ -285,7 +285,7 @@ export default function Routing() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 24 }}>
         <div style={{
           background: "#0f172a", border: "1px solid #1e293b",
           borderRadius: 12, padding: 16, minHeight: 400,

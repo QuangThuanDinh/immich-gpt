@@ -31,6 +31,7 @@ interface Props {
   pageSize: number;
   expanded: boolean;
   onToggle: () => void;
+  onAssetClick: (assetId: string) => void;
 }
 
 function locationText(location: Record<string, unknown> | null | undefined): string {
@@ -46,10 +47,12 @@ function ReviewItem({
   planId,
   item,
   destinations,
+  onAssetClick,
 }: {
   planId: string;
   item: RoutingPlanItem;
   destinations: RoutingNode[];
+  onAssetClick: (assetId: string) => void;
 }) {
   const qc = useQueryClient();
   const [description, setDescription] = useState(item.suggested_description ?? "");
@@ -61,7 +64,7 @@ function ReviewItem({
   const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
-  const editable = item.status === "pending";
+  const editable = item.status === "pending" || item.status === "failed";
 
   useEffect(() => {
     setDescription(item.suggested_description ?? "");
@@ -142,7 +145,13 @@ function ReviewItem({
 
   return (
     <div className={styles.item}>
-      <Thumbnail assetId={item.asset_id} size={100} className={styles.thumbnail} />
+      <Thumbnail
+        assetId={item.asset_id}
+        size={100}
+        className={styles.thumbnail}
+        onClick={() => onAssetClick(item.asset_id)}
+        ariaLabel="View asset metadata"
+      />
       <div className={styles.fields}>
         {editable ? (
           <>
@@ -222,6 +231,11 @@ function ReviewItem({
           </div>
         )}
         {saveError && <span className={styles.error}>Save failed</span>}
+        {item.status === "failed" && item.error_message && (
+          <span className={styles.error} title={item.error_message}>
+            {item.error_message}
+          </span>
+        )}
         {reviewError && <span className={styles.error}>{reviewError}</span>}
       </div>
     </div>
@@ -237,6 +251,7 @@ export default function RoutingPlanGroup({
   pageSize,
   expanded,
   onToggle,
+  onAssetClick,
 }: Props) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
@@ -273,8 +288,10 @@ export default function RoutingPlanGroup({
     enabled: expanded,
   });
 
-  const pendingPageIds = useMemo(
-    () => items.filter((item) => item.status === "pending").map((item) => item.id),
+  const actionablePageIds = useMemo(
+    () => items
+      .filter((item) => item.status === "pending" || item.status === "failed")
+      .map((item) => item.id),
     [items]
   );
 
@@ -353,8 +370,8 @@ export default function RoutingPlanGroup({
           <div className={styles.groupActions}>
             <button disabled={busy} className={styles.approve} onClick={() => void runAction("approve", group.item_ids, "approve-all")}>{actionLabel("approve-all", "Approve All")}</button>
             <button disabled={busy} className={styles.reject} onClick={() => void runAction("reject", group.item_ids, "reject-all")}>{actionLabel("reject-all", "Reject All")}</button>
-            <button disabled={busy || !expanded || pendingPageIds.length === 0} className={styles.approve} onClick={() => void runAction("approve", pendingPageIds, "approve-page")}>{actionLabel("approve-page", "Approve This Page")}</button>
-            <button disabled={busy || !expanded || pendingPageIds.length === 0} className={styles.reject} onClick={() => void runAction("reject", pendingPageIds, "reject-page")}>{actionLabel("reject-page", "Reject This Page")}</button>
+            <button disabled={busy || !expanded || actionablePageIds.length === 0} className={styles.approve} onClick={() => void runAction("approve", actionablePageIds, "approve-page")}>{actionLabel("approve-page", "Approve This Page")}</button>
+            <button disabled={busy || !expanded || actionablePageIds.length === 0} className={styles.reject} onClick={() => void runAction("reject", actionablePageIds, "reject-page")}>{actionLabel("reject-page", "Reject This Page")}</button>
           </div>
         )}
       </div>
@@ -367,7 +384,13 @@ export default function RoutingPlanGroup({
           {!isLoading && !isError && items.length === 0 && <div className={styles.message}>No photos on this page.</div>}
           <div className={styles.list}>
             {items.map((item) => (
-              <ReviewItem key={item.id} planId={planId} item={item} destinations={destinations} />
+              <ReviewItem
+                key={item.id}
+                planId={planId}
+                item={item}
+                destinations={destinations}
+                onAssetClick={onAssetClick}
+              />
             ))}
           </div>
           {totalPages > 1 && (

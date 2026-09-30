@@ -11,6 +11,7 @@ import type { RoutingPlanSummary, RoutingPlanGroupItem } from "../types";
 import { usePageVisible } from "../hooks/usePageVisible";
 import RunRoutingButton from "../components/RunRoutingButton";
 import RoutingPlanGroup from "../components/RoutingPlanGroup";
+import AssetDetailPanel from "../components/AssetDetailPanel";
 import { CheckCircle2, AlertTriangle, Trash2, XCircle, Clock, type LucideIcon } from "lucide-react";
 
 const GROUP_DEFS: {
@@ -38,6 +39,7 @@ export default function RoutingPlans() {
   const destinations = routingNodes.filter((node) => node.is_leaf && node.enabled);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useQuery<RoutingPlanSummary>({
     queryKey: ["routing-plan-summary", selectedPlanId],
@@ -97,6 +99,7 @@ export default function RoutingPlans() {
                 applyMut.reset();
                 setSelectedPlanId(p.id);
                 setExpandedGroupId(null);
+                setSelectedAssetId(null);
               }}
               style={{
                 padding: "10px 12px", borderRadius: 8, marginBottom: 6,
@@ -240,12 +243,14 @@ export default function RoutingPlans() {
                               key === "ready_to_approve"
                               || key === "needs_review"
                               || key === "trash_candidates"
+                              || key === "failed"
                             }
                             pageSize={summary.page_size ?? 20}
                             expanded={expandedGroupId === groupId}
                             onToggle={() => setExpandedGroupId((current) => (
                               current === groupId ? null : groupId
                             ))}
+                            onAssetClick={setSelectedAssetId}
                           />
                         );
                       })}
@@ -257,6 +262,12 @@ export default function RoutingPlans() {
           )}
         </div>
       </div>
+      {selectedAssetId && (
+        <AssetDetailPanel
+          assetId={selectedAssetId}
+          onClose={() => setSelectedAssetId(null)}
+        />
+      )}
     </div>
   );
 }

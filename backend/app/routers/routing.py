@@ -481,21 +481,29 @@ def plan_approve(
 
     item_ids = body.item_ids or []
     if body.bucket_id:
-        items = svc.list_items(plan_id, status="pending", bucket_id=body.bucket_id)
+        items = [
+            item
+            for item in svc.list_items(plan_id, bucket_id=body.bucket_id)
+            if item.status in ("pending", "failed")
+        ]
         item_ids = list(set(item_ids) | {i.id for i in items})
     if not item_ids and not body.bucket_id:
-        items = svc.list_items(plan_id, status="pending")
+        items = [
+            item
+            for item in svc.list_items(plan_id)
+            if item.status in ("pending", "failed")
+        ]
         item_ids = [i.id for i in items]
-    pending_items = [
+    actionable_items = [
         item
         for item in svc.list_items_by_ids(item_ids, plan_id=plan_id)
-        if item.status == "pending"
+        if item.status in ("pending", "failed")
     ]
     count = svc.approve_items(
-        [item.id for item in pending_items],
+        [item.id for item in actionable_items],
         plan_id=plan_id,
     )
-    result = _apply_items(db, current_user.id, svc, pending_items)
+    result = _apply_items(db, current_user.id, svc, actionable_items)
     return {"approved": count, **result}
 
 
@@ -511,14 +519,18 @@ def plan_reject(
         raise HTTPException(status_code=404, detail="Plan not found")
     item_ids = body.item_ids or []
     if body.bucket_id:
-        items = svc.list_items(
-            plan_id,
-            status="pending",
-            bucket_id=body.bucket_id,
-        )
+        items = [
+            item
+            for item in svc.list_items(plan_id, bucket_id=body.bucket_id)
+            if item.status in ("pending", "failed")
+        ]
         item_ids = list(set(item_ids) | {i.id for i in items})
     if not item_ids:
-        items = svc.list_items(plan_id, status="pending")
+        items = [
+            item
+            for item in svc.list_items(plan_id)
+            if item.status in ("pending", "failed")
+        ]
         item_ids = [i.id for i in items]
     count = svc.reject_items(item_ids, plan_id=plan_id)
     return {"rejected": count}

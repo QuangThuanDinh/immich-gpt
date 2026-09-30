@@ -7,21 +7,41 @@ interface Props {
   assetId: string;
   size?: number;
   onClick?: () => void;
+  ariaLabel?: string;
   className?: string;
 }
 
-export default function Thumbnail({ assetId, size = 80, onClick, className }: Props) {
+export default function Thumbnail({
+  assetId,
+  size = 80,
+  onClick,
+  ariaLabel,
+  className,
+}: Props) {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   const rootStyle = { width: size, height: size };
   const iconSize = Math.round(size / 3);
+  const interactiveProps = onClick ? {
+    onClick,
+    onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onClick();
+      }
+    },
+    role: "button",
+    tabIndex: 0,
+    "aria-label": ariaLabel ?? "View asset metadata",
+  } : {};
 
   if (error) {
     return (
       <div
-        className={[styles.root, className].filter(Boolean).join(" ")}
+        className={[styles.root, onClick ? styles.rootClickable : "", className].filter(Boolean).join(" ")}
         style={rootStyle}
+        {...interactiveProps}
       >
         <div className={styles.placeholder}>
           <Image size={iconSize} color="var(--text-faint)" />
@@ -34,7 +54,7 @@ export default function Thumbnail({ assetId, size = 80, onClick, className }: Pr
     <div
       className={[styles.root, onClick ? styles.rootClickable : "", className].filter(Boolean).join(" ")}
       style={rootStyle}
-      onClick={onClick}
+      {...interactiveProps}
     >
       {!loaded && (
         <div className={styles.placeholder}>

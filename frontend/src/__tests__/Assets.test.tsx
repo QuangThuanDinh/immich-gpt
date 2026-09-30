@@ -7,6 +7,7 @@ import Assets from "../pages/Assets";
 
 vi.mock("../services/api", () => ({
   getAssets: vi.fn(),
+  getAsset: vi.fn(),
   getAssetCount: vi.fn(),
   getThumbnailUrl: (assetId: string, size = "thumbnail") =>
     `/api/thumbnails/${assetId}?size=${size}`,

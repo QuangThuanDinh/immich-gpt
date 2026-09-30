@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   approveMock: vi.fn(),
   rejectMock: vi.fn(),
   applyMock: vi.fn(),
+  assetMock: vi.fn(),
 }));
 
 vi.mock("../services/api", () => ({
@@ -46,6 +47,11 @@ vi.mock("../services/api", () => ({
   rejectRoutingPlanItems: mocks.rejectMock,
   moveRoutingPlanItems: vi.fn(),
   applyRoutingPlan: mocks.applyMock,
+  getAsset: mocks.assetMock,
+  getImmichSettings: vi.fn().mockResolvedValue({
+    immich_url: "https://image.example.com/",
+    connected: true,
+  }),
   getRoutingPlan: vi.fn(),
   getThumbnailUrl: (assetId: string) => `/api/thumbnails/${assetId}`,
 }));
@@ -54,6 +60,7 @@ const {
   treeMock, createMock, examplesMock, promptPreviewMock,
   classifyMock, plansMock, planSummaryMock, planItemsMock, updateItemMock,
   nodesMock, approveMock, rejectMock, applyMock,
+  assetMock,
 } = mocks;
 
 import Routing from "../pages/Routing";
@@ -96,9 +103,25 @@ beforeEach(() => {
   approveMock.mockReset();
   rejectMock.mockReset();
   applyMock.mockReset();
+  assetMock.mockReset();
   classifyMock.mockReset();
   classifyMock.mockResolvedValue({ job_id: "job-1", plan_id: "plan-1", status: "queued" });
   applyMock.mockResolvedValue({ applied: 0, failed: 0 });
+  assetMock.mockResolvedValue({
+    id: "a1",
+    immich_id: "immich-a1",
+    original_filename: "photo.jpg",
+    file_created_at: "2026-05-05T10:00:00Z",
+    asset_type: "IMAGE",
+    mime_type: "image/jpeg",
+    city: "Hanoi",
+    country: "Vietnam",
+    tags: ["existing-tag"],
+    is_favorite: false,
+    is_archived: false,
+    is_external_library: false,
+    created_at: "2026-05-05T10:00:00Z",
+  });
   planItemsMock.mockResolvedValue([]);
   nodesMock.mockResolvedValue([]);
   planSummaryMock.mockResolvedValue({
@@ -354,6 +377,23 @@ describe("Routing plans page", () => {
     fireEvent.click(await screen.findByText(/ready ·/i));
     fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
 
+    fireEvent.click(await screen.findByRole("button", { name: "View asset metadata" }));
+    await waitFor(() => expect(assetMock).toHaveBeenCalledWith("a1"));
+    expect(await screen.findByRole("dialog", { name: "Asset details" })).toBeInTheDocument();
+    expect(screen.getByText("photo.jpg")).toBeInTheDocument();
+    expect(screen.getByText("Hanoi, Vietnam")).toBeInTheDocument();
+    expect(screen.getByText("Current tags")).toBeInTheDocument();
+    expect(screen.getByText("existing-tag")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /immich-a1/i })).toHaveAttribute(
+      "href",
+      "https://image.example.com/photos/immich-a1"
+    );
+    expect(screen.getByRole("link", { name: /immich-a1/i })).toHaveAttribute(
+      "target",
+      "_blank"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close asset details" }));
+
     const description = await screen.findByDisplayValue("Original");
     fireEvent.change(description, { target: { value: "Edited" } });
     fireEvent.blur(description);
@@ -509,6 +549,51 @@ describe("Routing plans page", () => {
 
     expect(await screen.findByText("Applied 1; failed 0.")).toBeInTheDocument();
     expect(applyMock).toHaveBeenCalledWith("p1");
+  });
+
+  it("allows failed items to be edited, retried, or rejected", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "partially_applied", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 1,
+      groups: {
+        auto_applied: [], ready_to_approve: [], needs_review: [],
+        trash_candidates: [], rejected: [],
+        failed: [{ path: "Personal", bucket_id: "b1", count: 1, item_ids: ["i1"] }],
+      },
+    });
+    const failedItem = {
+      id: "i1", plan_id: "p1", asset_id: "a1",
+      primary_bucket_id: "b1", primary_bucket_path: "Personal",
+      secondary_bucket_ids: [], disposition: "keep", confidence: 0.9,
+      review_required: false, auto_apply: false, review_reasons: [],
+      reason_codes: [], safety_flags: {}, quality_flags: {},
+      suggested_description: "Retry me", suggested_tags: [],
+      suggested_location: null, suggested_caption: null,
+      status: "failed", error_message: "Tag write failed",
+    };
+    planItemsMock.mockResolvedValue([failedItem]);
+    updateItemMock.mockResolvedValue(failedItem);
+    approveMock.mockResolvedValue({ approved: 1, applied: 1, failed: 0 });
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/partially_applied ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
+
+    const description = await screen.findByDisplayValue("Retry me");
+    fireEvent.change(description, { target: { value: "Edited retry" } });
+    fireEvent.blur(description);
+    await waitFor(() => expect(updateItemMock).toHaveBeenCalled());
+    expect(screen.getByText("Tag write failed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(approveMock).toHaveBeenCalledWith(
+      "p1",
+      { item_ids: ["i1"] }
+    ));
+    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument();
   });
 
   it("uses the page size supplied by the backend", async () => {
