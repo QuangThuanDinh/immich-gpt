@@ -157,11 +157,7 @@ class RoutingClassificationOrchestrator:
         plan: RoutingPlan,
         job_id: str,
     ) -> None:
-        image_payload: Optional[dict] = None
-        try:
-            image_payload = self.image_service.prepare_for_provider(asset.immich_id)
-        except Exception:
-            image_payload = None
+        image_payload = self.image_service.prepare_for_provider(asset.immich_id)
 
         messages = self.assemble_routing_messages(asset, leaves)
 

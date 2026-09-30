@@ -94,6 +94,27 @@ def _parse_json_content(raw: str) -> Dict[str, Any]:
         raise ValueError(f"Invalid JSON from provider: {e}\nRaw: {raw[:500]}")
 
 
+def _normalize_azure_base_url(base_url: str) -> tuple[str, str]:
+    endpoint = validate_service_url(
+        base_url,
+        field_name="Azure OpenAI Base URL",
+    )
+    parsed = urlparse(endpoint)
+    if parsed.query or parsed.fragment:
+        raise ServiceUrlError(
+            "Azure OpenAI Base URL cannot contain a query or fragment"
+        )
+
+    path = parsed.path.rstrip("/")
+    if path not in {"", "/openai/v1"}:
+        raise ServiceUrlError(
+            "Azure OpenAI Base URL must be a resource origin or end with /openai/v1"
+        )
+
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    return origin, f"{origin}/openai/v1"
+
+
 class OpenAIProvider(AIProvider):
     DEFAULT_TIMEOUT_SECONDS = 120.0
 
@@ -114,20 +135,12 @@ class OpenAIProvider(AIProvider):
                 raise ValueError(
                     "Azure OpenAI requires Base URL and Deployment"
                 )
-            endpoint = validate_service_url(
-                base_url,
-                field_name="Azure OpenAI Base URL",
-            )
-            parsed = urlparse(endpoint)
-            if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-                raise ServiceUrlError(
-                    "Azure OpenAI Base URL must be a resource origin without a path, query, or fragment"
-                )
+            azure_endpoint, azure_v1_base_url = _normalize_azure_base_url(base_url)
             if azure_api_version:
                 from openai import AzureOpenAI
                 self._client = AzureOpenAI(
                     api_key=api_key,
-                    azure_endpoint=endpoint.rstrip("/"),
+                    azure_endpoint=azure_endpoint,
                     api_version=azure_api_version,
                     azure_deployment=azure_deployment,
                     timeout=timeout,
@@ -136,7 +149,7 @@ class OpenAIProvider(AIProvider):
                 from openai import OpenAI
                 self._client = OpenAI(
                     api_key=api_key,
-                    base_url=f"{endpoint.rstrip('/')}/openai/v1",
+                    base_url=azure_v1_base_url,
                     timeout=timeout,
                 )
             self.model = azure_deployment
@@ -201,10 +214,6 @@ class OllamaProvider(AIProvider):
         except Exception:
             return False
 
-    def _is_vision_model(self) -> bool:
-        keywords = ("llava", "moondream", "bakllava", "minicpm", "qwen2-vl", "pixtral")
-        return any(kw in self.model.lower() for kw in keywords)
-
     def classify_routing(
         self,
         prompt_messages: List[Dict[str, Any]],
@@ -212,11 +221,7 @@ class OllamaProvider(AIProvider):
     ) -> Dict[str, Any]:
         import httpx
 
-        messages = (
-            _inject_image(prompt_messages, image_payload, detail=None)
-            if self._is_vision_model()
-            else list(prompt_messages)
-        )
+        messages = _inject_image(prompt_messages, image_payload, detail=None)
 
         # Append a JSON-only reminder for non-instruct models.
         if messages and messages[-1].get("role") == "user":
@@ -241,8 +246,9 @@ class OllamaProvider(AIProvider):
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": 0.2},
-            "format": "json",
+            "temperature": 0.2,
+            "max_tokens": 1024,
+            "response_format": {"type": "json_object"},
         }
         try:
             with httpx.Client(timeout=120) as client:
@@ -273,7 +279,7 @@ class OpenRouterProvider(AIProvider):
         self.base_url = get_openrouter_api_base_url(base_url)
         self._extra_headers = {
             "HTTP-Referer": "https://github.com/titatom/immich-gpt",
-            "X-Title": "immich-gpt",
+            "X-OpenRouter-Title": "immich-gpt",
         }
         from openai import OpenAI
         self._client = OpenAI(
@@ -290,7 +296,7 @@ class OpenRouterProvider(AIProvider):
         try:
             import httpx
             path = (
-                "auth/key"
+                "key"
                 if self.base_url == f"{OPENROUTER_DEFAULT_ORIGIN}/api/v1"
                 else "models"
             )
@@ -340,7 +346,7 @@ def build_provider(provider_name: str, config: dict) -> AIProvider:
     if provider_name == "openai":
         return OpenAIProvider(
             api_key=config["api_key"],
-            model=config.get("model_name", "gpt-4o"),
+            model=config.get("model_name") or "gpt-4o",
             base_url=config.get("base_url"),
             azure_api_version=config.get("azure_api_version"),
             azure_deployment=config.get("azure_deployment"),
@@ -348,13 +354,13 @@ def build_provider(provider_name: str, config: dict) -> AIProvider:
         )
     elif provider_name == "ollama":
         return OllamaProvider(
-            base_url=config.get("base_url", "http://localhost:11434"),
-            model=config.get("model_name", "llava"),
+            base_url=config.get("base_url") or "http://localhost:11434",
+            model=config.get("model_name") or "llava",
         )
     elif provider_name == "openrouter":
         return OpenRouterProvider(
             api_key=config["api_key"],
-            model=config.get("model_name", "openai/gpt-4o"),
+            model=config.get("model_name") or "openai/gpt-4o",
             base_url=config.get("base_url"),
         )
     raise ValueError(f"Unknown provider: {provider_name}")

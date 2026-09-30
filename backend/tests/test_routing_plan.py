@@ -2,6 +2,7 @@
 import uuid
 import pytest
 from datetime import datetime
+from unittest.mock import MagicMock
 from app.models.asset import Asset
 from app.services.routing_plan_service import RoutingPlanService
 from app.services.routing_tree import RoutingTreeService
@@ -76,6 +77,17 @@ def _make_orchestrator(db) -> RoutingClassificationOrchestrator:
         user_id=TEST_USER_ID,
         immich_client=object(),
     )
+
+
+def test_process_asset_stops_when_image_preparation_fails(db):
+    orchestrator = _make_orchestrator(db)
+    asset = _make_asset(db, "asset-without-thumbnail")
+    orchestrator.image_service.prepare_for_provider = MagicMock(
+        side_effect=RuntimeError("thumbnail unavailable")
+    )
+
+    with pytest.raises(RuntimeError, match="thumbnail unavailable"):
+        orchestrator._process_asset(asset, [], None, "job-id")
 
 
 def test_plan_groups_items_by_destination(db):

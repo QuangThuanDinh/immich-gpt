@@ -162,10 +162,12 @@ Provider definitions are stored per user in the database.
 - typically uses an API key
 - default model is `gpt-4o`
 - accepts an optional custom OpenAI-compatible Base URL, used exactly as entered
-- supports Azure OpenAI resource origins such as
-  `https://my-resource.openai.azure.com`:
-  - Base URL + Deployment uses `{Base URL}/openai/v1`
-  - adding API Version uses the versioned AzureOpenAI deployment API
+- supports Azure OpenAI API roots such as
+  `https://my-resource.openai.azure.com/openai/v1`; a resource origin without
+  `/openai/v1` is also accepted for backward compatibility
+  - Base URL + Deployment uses the Azure OpenAI v1 API
+  - adding API Version uses the versioned AzureOpenAI deployment API; the
+    resource origin is derived from either accepted Base URL form
 - Azure deployment replaces the Model value, and model-list verification is skipped
 
 #### OpenRouter
@@ -183,6 +185,8 @@ Provider definitions are stored per user in the database.
 - self-hosted local inference
 - no API key required
 - base URL usually looks like `http://localhost:11434`
+- routing requires a vision-capable model; thumbnails are sent through Ollama's
+  OpenAI-compatible `/v1/chat/completions` endpoint
 - can list local models from the Ollama server after the provider is saved
 
 ## Behavior settings

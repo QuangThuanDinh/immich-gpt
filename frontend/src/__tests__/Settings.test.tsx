@@ -70,13 +70,13 @@ describe("Settings page", () => {
     expect(screen.getByPlaceholderText("my-gpt-4o-deployment")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("https://api.openai.com/v1"), {
-      target: { value: "https://resource.openai.azure.com" },
+      target: { value: "https://resource.openai.azure.com/openai/v1" },
     });
     fireEvent.change(screen.getByPlaceholderText("my-gpt-4o-deployment"), {
       target: { value: "vision-deployment" },
     });
 
-    expect(screen.getByText(/uses \{Base URL\}\/openai\/v1/i)).toBeInTheDocument();
+    expect(screen.getByText(/Azure Base URL may end with \/openai\/v1/i)).toBeInTheDocument();
     expect(screen.getByText("Uses Azure deployment")).toBeInTheDocument();
   });
 });

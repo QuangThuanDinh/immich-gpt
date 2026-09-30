@@ -307,8 +307,8 @@ function ProviderFormPanel({
               : form.azure_deployment && form.azure_api_version
                 ? "Uses the versioned AzureOpenAI deployment API. Model verification is skipped."
                 : form.azure_deployment
-                  ? "Uses {Base URL}/openai/v1. Deployment replaces Model, and model verification is skipped."
-                  : "Leave Azure fields blank for standard OpenAI. Enter Deployment to use Azure /openai/v1; also enter API Version for the versioned API."}
+                  ? "Azure Base URL may end with /openai/v1; a resource origin is also accepted. Deployment replaces Model, and model verification is skipped."
+                  : "Leave Azure fields blank for standard OpenAI. For Azure, enter the /openai/v1 Base URL and Deployment; API Version enables the versioned API."}
           </div>
         </div>
       )}
