@@ -170,14 +170,17 @@ The **Routing plans** page is where immich-gpt becomes safe to use at scale.
 
 Plan results are grouped into states such as:
 
-- auto-applied
+- applied
 - ready to approve
 - needs review
 - trash candidates
 - rejected by rules
 - failed
 
-You can approve or reject grouped items, then use **Apply approved items** to write approved metadata, album placements, or trash actions back to Immich. Nothing is written back until an item is approved and the plan is applied.
+Approving an item or group immediately writes its configured metadata, album
+placement, or trash action to Immich. Rejecting an item immediately discards
+the suggestion without changing Immich. The recovery action can retry items
+that were approved by older versions but not yet applied.
 
 ## A safe rollout plan
 

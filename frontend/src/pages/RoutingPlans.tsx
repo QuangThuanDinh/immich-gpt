@@ -19,7 +19,7 @@ const GROUP_DEFS: {
   color: string;
   icon: LucideIcon;
 }[] = [
-  { key: "auto_applied", label: "Auto-applied", color: "#22c55e", icon: CheckCircle2 },
+  { key: "auto_applied", label: "Applied", color: "#22c55e", icon: CheckCircle2 },
   { key: "ready_to_approve", label: "Ready to approve", color: "#38bdf8", icon: CheckCircle2 },
   { key: "needs_review", label: "Needs review", color: "#f59e0b", icon: AlertTriangle },
   { key: "trash_candidates", label: "Trash candidates", color: "#ef4444", icon: Trash2 },
@@ -94,6 +94,7 @@ export default function RoutingPlans() {
             <div
               key={p.id}
               onClick={() => {
+                applyMut.reset();
                 setSelectedPlanId(p.id);
                 setExpandedGroupId(null);
               }}
@@ -179,6 +180,23 @@ export default function RoutingPlans() {
                       </div>
                     )}
                   </div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>
+                    Approve actions write changes to Immich immediately. Reject actions leave Immich unchanged.
+                  </div>
+                  {applyMut.data && (
+                    <div style={{
+                      fontSize: 11,
+                      color: applyMut.data.failed > 0 ? "#fca5a5" : "#86efac",
+                      marginTop: 4,
+                    }}>
+                      Applied {applyMut.data.applied}; failed {applyMut.data.failed}.
+                    </div>
+                  )}
+                  {applyMut.isError && (
+                    <div style={{ fontSize: 11, color: "#fca5a5", marginTop: 4 }}>
+                      Could not apply approved items.
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => applyMut.mutate()}
@@ -189,7 +207,7 @@ export default function RoutingPlans() {
                     cursor: "pointer",
                   }}
                 >
-                  Apply approved items
+                  {applyMut.isPending ? "Applying..." : "Retry previously approved items"}
                 </button>
               </div>
 

@@ -27,8 +27,68 @@ from ..services.routing_tree import RoutingTreeService, RoutingTreeError
 from ..services.leaf_prompt_compiler import LeafPromptCompiler
 from ..services.routing_plan_service import RoutingPlanService
 from ..services.routing_writeback import RoutingWritebackService
+from ..services.immich_client import ImmichClient
+from ..services.secret_store import decrypt_secret
 
 router = APIRouter(prefix="/api/routing", tags=["routing"])
+
+
+def _get_user_immich_client(db: Session, user_id: str) -> ImmichClient:
+    from ..models.app_setting import AppSetting
+
+    url_row = db.query(AppSetting).filter(
+        AppSetting.user_id == user_id,
+        AppSetting.key == "immich_url",
+    ).first()
+    key_row = db.query(AppSetting).filter(
+        AppSetting.user_id == user_id,
+        AppSetting.key == "immich_api_key",
+    ).first()
+    url = (url_row.value if url_row and url_row.value else None) or settings.IMMICH_URL
+    stored_key = key_row.value if key_row and key_row.value else None
+    api_key = decrypt_secret(stored_key) if stored_key else settings.IMMICH_API_KEY
+    return ImmichClient(url, api_key)
+
+
+def _apply_items(
+    db: Session,
+    user_id: str,
+    svc: RoutingPlanService,
+    items: List[RoutingPlanItem],
+) -> dict:
+    if not items:
+        return {"applied": 0, "failed": 0}
+
+    writeback = RoutingWritebackService(
+        db,
+        user_id,
+        _get_user_immich_client(db, user_id),
+    )
+    applied = 0
+    failed = 0
+    for item in items:
+        item_id = item.id
+        try:
+            result = writeback.apply_item(item)
+            if result.errors:
+                item.status = "failed"
+                item.error_message = "; ".join(result.errors)[:500]
+                failed += 1
+            else:
+                item.status = "applied"
+                item.error_message = None
+                applied += 1
+            db.commit()
+        except Exception as exc:  # pragma: no cover
+            db.rollback()
+            failed_item = svc.get_item(item_id)
+            if failed_item:
+                failed_item.status = "failed"
+                failed_item.error_message = str(exc)[:500]
+                db.commit()
+            failed += 1
+    svc.mark_plan_applied(items[0].plan_id)
+    return {"applied": applied, "failed": failed}
 
 
 # ---------------------------------------------------------------------------
@@ -426,8 +486,17 @@ def plan_approve(
     if not item_ids and not body.bucket_id:
         items = svc.list_items(plan_id, status="pending")
         item_ids = [i.id for i in items]
-    count = svc.approve_items(item_ids, plan_id=plan_id)
-    return {"approved": count}
+    pending_items = [
+        item
+        for item in svc.list_items_by_ids(item_ids, plan_id=plan_id)
+        if item.status == "pending"
+    ]
+    count = svc.approve_items(
+        [item.id for item in pending_items],
+        plan_id=plan_id,
+    )
+    result = _apply_items(db, current_user.id, svc, pending_items)
+    return {"approved": count, **result}
 
 
 @router.post("/plans/{plan_id}/reject")
@@ -482,25 +551,5 @@ def plan_apply(
     plan = svc.get_plan(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    writeback = RoutingWritebackService(db, current_user.id)
     items = svc.list_items(plan_id, status="approved")
-    applied = 0
-    failed = 0
-    for item in items:
-        try:
-            result = writeback.apply_item(item)
-            if result.errors:
-                item.status = "failed"
-                item.error_message = "; ".join(result.errors)[:500]
-                failed += 1
-            else:
-                item.status = "applied"
-                applied += 1
-            db.commit()
-        except Exception as e:  # pragma: no cover
-            item.status = "failed"
-            item.error_message = str(e)[:500]
-            db.commit()
-            failed += 1
-    svc.mark_plan_applied(plan_id)
-    return {"applied": applied, "failed": failed}
+    return _apply_items(db, current_user.id, svc, items)

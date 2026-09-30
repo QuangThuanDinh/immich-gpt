@@ -258,7 +258,7 @@ class RoutingPlanService:
     # ------------------------------------------------------------------
 
     def approve_items(self, item_ids: List[str], plan_id: Optional[str] = None) -> int:
-        items = self._items_by_ids(item_ids, plan_id=plan_id)
+        items = self.list_items_by_ids(item_ids, plan_id=plan_id)
         count = 0
         for item in items:
             if item.status in ("pending",):
@@ -268,7 +268,7 @@ class RoutingPlanService:
         return count
 
     def reject_items(self, item_ids: List[str], plan_id: Optional[str] = None) -> int:
-        items = self._items_by_ids(item_ids, plan_id=plan_id)
+        items = self.list_items_by_ids(item_ids, plan_id=plan_id)
         count = 0
         for item in items:
             if item.status == "pending":
@@ -349,7 +349,7 @@ class RoutingPlanService:
         )
         if not target:
             raise ValueError(f"Target bucket {target_bucket_id} not found")
-        items = self._items_by_ids(item_ids, plan_id=plan_id)
+        items = self.list_items_by_ids(item_ids, plan_id=plan_id)
         count = 0
         from .routing_learning import RoutingLearningService
         learner = RoutingLearningService(self.db, self.user_id)
@@ -379,7 +379,7 @@ class RoutingPlanService:
             item.error_message = error
         self.db.commit()
 
-    def _items_by_ids(
+    def list_items_by_ids(
         self,
         item_ids: List[str],
         plan_id: Optional[str] = None,

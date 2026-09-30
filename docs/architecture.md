@@ -159,12 +159,13 @@ Important safety property:
 immich-gpt is intentionally review-first.
 
 1. AI output enters a routing plan
-2. the plan groups items into auto-applied, ready-to-approve, needs-review, trash-candidate, rejected, and failed states
+2. the plan groups items into applied, ready-to-approve, needs-review, trash-candidate, rejected, and failed states
 3. the user approves or rejects plan items
-4. Immich receives approved metadata or album changes
+4. approval immediately writes configured metadata or album changes to Immich; rejection writes nothing
 5. audit logs capture important actions and errors
 
-Nothing is written back until a plan item is approved and the approved items are applied.
+Nothing is written back until a plan item is approved. Items approved by older
+versions can be retried with the recovery action on the plan.
 
 ## Routing tree and destination modes
 

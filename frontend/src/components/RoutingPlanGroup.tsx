@@ -60,7 +60,7 @@ function ReviewItem({
   const [busy, setBusy] = useState(false);
   const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
   const [saveError, setSaveError] = useState(false);
-  const [reviewError, setReviewError] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const editable = item.status === "pending";
 
   useEffect(() => {
@@ -111,11 +111,17 @@ function ReviewItem({
   const review = async (action: ReviewAction) => {
     setBusy(true);
     setReviewAction(action);
-    setReviewError(false);
+    setReviewError(null);
     try {
       await save();
       if (action === "approve") {
-        await approveRoutingPlanItems(planId, { item_ids: [item.id] });
+        const result = await approveRoutingPlanItems(
+          planId,
+          { item_ids: [item.id] },
+        );
+        if (result.failed > 0) {
+          setReviewError("Approved, but writeback to Immich failed");
+        }
       } else {
         await rejectRoutingPlanItems(planId, { item_ids: [item.id] });
       }
@@ -125,7 +131,7 @@ function ReviewItem({
         qc.invalidateQueries({ queryKey: ["routing-plans"] }),
       ]);
     } catch {
-      setReviewError(true);
+      setReviewError("Action failed");
     } finally {
       setBusy(false);
       setReviewAction(null);
@@ -186,7 +192,9 @@ function ReviewItem({
         )}
       </div>
       <div className={styles.itemActions}>
-        <span className={styles.status}>{item.status}</span>
+        <span className={styles.status}>
+          {item.status === "approved" ? "Approved - retry required" : item.status}
+        </span>
         {editable && (
           <div className={styles.itemButtonRow}>
             <button
@@ -214,7 +222,7 @@ function ReviewItem({
           </div>
         )}
         {saveError && <span className={styles.error}>Save failed</span>}
-        {reviewError && <span className={styles.error}>Action failed</span>}
+        {reviewError && <span className={styles.error}>{reviewError}</span>}
       </div>
     </div>
   );
@@ -238,7 +246,7 @@ export default function RoutingPlanGroup({
     completed: number;
     total: number;
   } | null>(null);
-  const [actionError, setActionError] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const totalPages = Math.max(1, Math.ceil(group.count / pageSize));
   const queryKey = [
     "routing-plan-items",
@@ -277,13 +285,18 @@ export default function RoutingPlanGroup({
   ) => {
     if (itemIds.length === 0) return;
     setBusy(true);
-    setActionError(false);
+    setActionError(null);
     setProgress({ action: actionKey, completed: 0, total: itemIds.length });
     try {
+      let failed = 0;
       for (let offset = 0; offset < itemIds.length; offset += ACTION_BATCH_SIZE) {
         const batch = itemIds.slice(offset, offset + ACTION_BATCH_SIZE);
         if (action === "approve") {
-          await approveRoutingPlanItems(planId, { item_ids: batch });
+          const result = await approveRoutingPlanItems(
+            planId,
+            { item_ids: batch },
+          );
+          failed += result.failed;
         } else {
           await rejectRoutingPlanItems(planId, { item_ids: batch });
         }
@@ -293,13 +306,18 @@ export default function RoutingPlanGroup({
           total: itemIds.length,
         });
       }
+      if (failed > 0) {
+        setActionError(
+          `${failed} approved item${failed === 1 ? "" : "s"} could not be written to Immich.`
+        );
+      }
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["routing-plan-items", planId] }),
         qc.invalidateQueries({ queryKey: ["routing-plan-summary", planId] }),
         qc.invalidateQueries({ queryKey: ["routing-plans"] }),
       ]);
     } catch {
-      setActionError(true);
+      setActionError("Could not complete the action. Completed batches were saved.");
     } finally {
       setBusy(false);
       setProgress(null);
@@ -343,7 +361,7 @@ export default function RoutingPlanGroup({
 
       {expanded && (
         <div className={styles.panel}>
-          {actionError && <div className={`${styles.message} ${styles.error}`}>Could not complete the review action. Completed batches were saved.</div>}
+          {actionError && <div className={`${styles.message} ${styles.error}`}>{actionError}</div>}
           {isLoading && <div className={styles.message}>Loading photos...</div>}
           {isError && <div className={`${styles.message} ${styles.error}`}>Could not load photos.</div>}
           {!isLoading && !isError && items.length === 0 && <div className={styles.message}>No photos on this page.</div>}

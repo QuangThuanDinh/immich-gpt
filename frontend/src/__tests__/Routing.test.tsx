@@ -53,7 +53,7 @@ vi.mock("../services/api", () => ({
 const {
   treeMock, createMock, examplesMock, promptPreviewMock,
   classifyMock, plansMock, planSummaryMock, planItemsMock, updateItemMock,
-  nodesMock, approveMock, rejectMock,
+  nodesMock, approveMock, rejectMock, applyMock,
 } = mocks;
 
 import Routing from "../pages/Routing";
@@ -95,8 +95,10 @@ beforeEach(() => {
   nodesMock.mockReset();
   approveMock.mockReset();
   rejectMock.mockReset();
+  applyMock.mockReset();
   classifyMock.mockReset();
   classifyMock.mockResolvedValue({ job_id: "job-1", plan_id: "plan-1", status: "queued" });
+  applyMock.mockResolvedValue({ applied: 0, failed: 0 });
   planItemsMock.mockResolvedValue([]);
   nodesMock.mockResolvedValue([]);
   planSummaryMock.mockResolvedValue({
@@ -480,8 +482,33 @@ describe("Routing plans page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Expand Personal" }));
 
     expect(await screen.findByText("Approved description")).toBeInTheDocument();
+    expect(screen.getByText("Approved - retry required")).toBeInTheDocument();
+    expect(screen.getByText(/Approve actions write changes to Immich immediately/)).toBeInTheDocument();
     expect(screen.queryByDisplayValue("Approved description")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  });
+
+  it("reports the result of applying approved items", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1", total: 1,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [],
+        needs_review: [], trash_candidates: [], rejected: [], failed: [],
+      },
+    });
+    applyMock.mockResolvedValue({ applied: 1, failed: 0 });
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByText(/ready ·/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry previously approved items" }));
+
+    expect(await screen.findByText("Applied 1; failed 0.")).toBeInTheDocument();
+    expect(applyMock).toHaveBeenCalledWith("p1");
   });
 
   it("uses the page size supplied by the backend", async () => {

@@ -289,7 +289,8 @@ export const updateRoutingPlanItem = (
 export const approveRoutingPlanItems = (
   planId: string,
   data: { item_ids?: string[]; bucket_id?: string }
-) => api.post(`/routing/plans/${planId}/approve`, data).then((r) => r.data);
+): Promise<{ approved: number; applied: number; failed: number }> =>
+  api.post(`/routing/plans/${planId}/approve`, data).then((r) => r.data);
 
 export const rejectRoutingPlanItems = (
   planId: string,
@@ -301,7 +302,9 @@ export const moveRoutingPlanItems = (
   data: { item_ids: string[]; target_bucket_id: string }
 ) => api.post(`/routing/plans/${planId}/items/move`, data).then((r) => r.data);
 
-export const applyRoutingPlan = (planId: string) =>
+export const applyRoutingPlan = (
+  planId: string
+): Promise<{ applied: number; failed: number }> =>
   api.post(`/routing/plans/${planId}/apply`).then((r) => r.data);
 
 // --- Thumbnail URL helper ---

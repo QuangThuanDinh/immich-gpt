@@ -3,9 +3,13 @@ import uuid
 import pytest
 from contextlib import nullcontext
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 from app.models.asset import Asset
 from app.config import settings
+from app.models.app_setting import AppSetting
+from app.models.routing_plan import RoutingPlan, RoutingPlanItem
+from app.services.secret_store import encrypt_secret
 from app.services.routing_plan_service import RoutingPlanService
 from app.services.routing_tree import RoutingTreeService
 from app.services.routing_classification import RoutingClassificationOrchestrator
@@ -79,6 +83,188 @@ def _make_orchestrator(db) -> RoutingClassificationOrchestrator:
         user_id=TEST_USER_ID,
         immich_client=object(),
     )
+
+
+def test_plan_apply_uses_current_users_saved_immich_connection(db, monkeypatch):
+    from app.routers import routing
+
+    db.add_all([
+        AppSetting(
+            id=str(uuid.uuid4()),
+            user_id=TEST_USER_ID,
+            key="immich_url",
+            value="https://immich.example.com",
+        ),
+        AppSetting(
+            id=str(uuid.uuid4()),
+            user_id=TEST_USER_ID,
+            key="immich_api_key",
+            value=encrypt_secret("saved-api-key"),
+        ),
+        RoutingPlan(
+            id="plan-with-user-connection",
+            user_id=TEST_USER_ID,
+            status="ready",
+        ),
+        RoutingPlanItem(
+            id="previously-approved-item",
+            user_id=TEST_USER_ID,
+            plan_id="plan-with-user-connection",
+            asset_id="local-asset-id",
+            status="approved",
+        ),
+    ])
+    db.commit()
+    immich_client = object()
+    client_factory = MagicMock(return_value=immich_client)
+    writeback = MagicMock()
+    writeback.apply_item.return_value = SimpleNamespace(errors=[])
+    writeback_factory = MagicMock(return_value=writeback)
+    monkeypatch.setattr(routing, "ImmichClient", client_factory)
+    monkeypatch.setattr(routing, "RoutingWritebackService", writeback_factory)
+
+    result = routing.plan_apply(
+        "plan-with-user-connection",
+        db=db,
+        current_user=SimpleNamespace(id=TEST_USER_ID),
+    )
+
+    client_factory.assert_called_once_with(
+        "https://immich.example.com",
+        "saved-api-key",
+    )
+    writeback_factory.assert_called_once_with(
+        db,
+        TEST_USER_ID,
+        immich_client,
+    )
+    assert result == {"applied": 1, "failed": 0}
+
+
+def test_plan_approve_applies_selected_pending_items_immediately(
+    client,
+    db,
+    monkeypatch,
+):
+    from app.routers import routing
+
+    plan = RoutingPlan(
+        id="immediate-approval-plan",
+        user_id=TEST_USER_ID,
+        status="ready",
+    )
+    item = RoutingPlanItem(
+        id="pending-item",
+        user_id=TEST_USER_ID,
+        plan_id=plan.id,
+        asset_id="local-asset-id",
+        status="pending",
+    )
+    db.add_all([plan, item])
+    db.commit()
+    immich_client = object()
+    writeback = MagicMock()
+    writeback.apply_item.return_value = SimpleNamespace(errors=[])
+    writeback_factory = MagicMock(return_value=writeback)
+    monkeypatch.setattr(
+        routing,
+        "_get_user_immich_client",
+        lambda *_: immich_client,
+    )
+    monkeypatch.setattr(routing, "RoutingWritebackService", writeback_factory)
+
+    response = client.post(
+        f"/api/routing/plans/{plan.id}/approve",
+        json={"item_ids": [item.id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"approved": 1, "applied": 1, "failed": 0}
+    db.refresh(item)
+    assert item.status == "applied"
+    writeback.apply_item.assert_called_once()
+
+
+def test_plan_approve_reports_writeback_failure(client, db, monkeypatch):
+    from app.routers import routing
+
+    plan = RoutingPlan(
+        id="failed-approval-plan",
+        user_id=TEST_USER_ID,
+        status="ready",
+    )
+    item = RoutingPlanItem(
+        id="failed-approval-item",
+        user_id=TEST_USER_ID,
+        plan_id=plan.id,
+        asset_id="local-asset-id",
+        status="pending",
+    )
+    db.add_all([plan, item])
+    db.commit()
+    writeback = MagicMock()
+    writeback.apply_item.return_value = SimpleNamespace(
+        errors=["Failed to write tags"],
+    )
+    monkeypatch.setattr(
+        routing,
+        "_get_user_immich_client",
+        lambda *_: object(),
+    )
+    monkeypatch.setattr(
+        routing,
+        "RoutingWritebackService",
+        MagicMock(return_value=writeback),
+    )
+
+    response = client.post(
+        f"/api/routing/plans/{plan.id}/approve",
+        json={"item_ids": [item.id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"approved": 1, "applied": 0, "failed": 1}
+    db.refresh(item)
+    assert item.status == "failed"
+    assert item.error_message == "Failed to write tags"
+
+
+def test_plan_reject_is_immediate_without_immich_writeback(
+    client,
+    db,
+    monkeypatch,
+):
+    from app.routers import routing
+
+    plan = RoutingPlan(
+        id="immediate-rejection-plan",
+        user_id=TEST_USER_ID,
+        status="ready",
+    )
+    item = RoutingPlanItem(
+        id="pending-rejection-item",
+        user_id=TEST_USER_ID,
+        plan_id=plan.id,
+        asset_id="local-asset-id",
+        status="pending",
+    )
+    db.add_all([plan, item])
+    db.commit()
+    client_factory = MagicMock(side_effect=AssertionError(
+        "Reject must not connect to Immich"
+    ))
+    monkeypatch.setattr(routing, "_get_user_immich_client", client_factory)
+
+    response = client.post(
+        f"/api/routing/plans/{plan.id}/reject",
+        json={"item_ids": [item.id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"rejected": 1}
+    db.refresh(item)
+    assert item.status == "rejected"
+    client_factory.assert_not_called()
 
 
 def test_process_asset_stops_when_image_preparation_fails(db):

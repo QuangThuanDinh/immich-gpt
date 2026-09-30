@@ -166,11 +166,12 @@ For a first run, **Sync + Route** is usually the easiest option.
 
 ### 4. Review and apply a routing plan
 
-In **Routing plans**, results are grouped as auto-applied, ready to approve, needs review, trash candidates, rejected by rules, or failed. You can:
+In **Routing plans**, results are grouped as applied, ready to approve, needs review, trash candidates, rejected by rules, or failed. You can:
 
-- approve or reject grouped items
+- approve grouped items and write their configured changes to Immich immediately
+- reject grouped items without changing Immich
 - inspect destination paths and counts
-- apply approved items to Immich
+- retry items approved by older versions
 - run a new plan when routing rules change
 
 ### 5. Roll out gradually
