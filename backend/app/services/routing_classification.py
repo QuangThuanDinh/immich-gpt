@@ -160,13 +160,13 @@ class RoutingClassificationOrchestrator:
         plan: RoutingPlan,
         job_id: str,
     ) -> None:
-        image_payload = self.image_service.prepare_for_provider(asset.immich_id)
-
+        asset_id = asset.id
+        asset_immich_id = asset.immich_id
         messages = self.assemble_routing_messages(asset, leaves)
 
         prompt_run = PromptRun(
             id=str(uuid.uuid4()),
-            asset_id=asset.id,
+            asset_id=asset_id,
             job_run_id=job_id,
             provider_name=self.provider.provider_name,
             model_name=getattr(self.provider, "model", None) or getattr(self.provider, "_model", None),
@@ -177,9 +177,10 @@ class RoutingClassificationOrchestrator:
             status="pending",
         )
         self.db.add(prompt_run)
-        self.db.flush()
+        self.db.commit()
 
         try:
+            image_payload = self.image_service.prepare_for_provider(asset_immich_id)
             raw = self._call_provider(messages, image_payload)
             ai_result = AIRoutingResult.model_validate(raw)
             prompt_run.raw_response = json.dumps(raw)
@@ -194,7 +195,7 @@ class RoutingClassificationOrchestrator:
         decision = self.decision_service.resolve_routing(ai_result, leaves)
         self.plan_service.add_item(
             plan,
-            asset_id=asset.id,
+            asset_id=asset_id,
             decision=decision,
             ai_metadata=ai_result.metadata.model_dump(),
             raw_ai_response=ai_result.model_dump(),

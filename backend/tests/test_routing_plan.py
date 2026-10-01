@@ -8,11 +8,13 @@ from unittest.mock import MagicMock
 from app.models.asset import Asset
 from app.config import settings
 from app.models.app_setting import AppSetting
+from app.models.prompt_run import PromptRun
 from app.models.routing_plan import RoutingPlan, RoutingPlanItem
 from app.services.secret_store import encrypt_secret
 from app.services.routing_plan_service import RoutingPlanService
 from app.services.routing_tree import RoutingTreeService
 from app.services.routing_classification import RoutingClassificationOrchestrator
+from app.services.routing_writeback import RoutingWritebackService
 from app.services.routing_schemas import (
     RoutingDecision, Candidate,
 )
@@ -360,6 +362,76 @@ def test_process_asset_stops_when_image_preparation_fails(db):
 
     with pytest.raises(RuntimeError, match="thumbnail unavailable"):
         orchestrator._process_asset(asset, [], None, "job-id")
+
+
+def test_process_asset_releases_transaction_during_external_calls(db):
+    orchestrator = _make_orchestrator(db)
+    asset = _make_asset(db, "asset-with-thumbnail")
+    plan = RoutingPlanService(db, TEST_USER_ID).create_plan()
+    transaction_states = []
+
+    def prepare_image(_immich_id):
+        transaction_states.append(("image", db.in_transaction()))
+        return {"base64": "image"}
+
+    def classify(_messages, _image_payload):
+        transaction_states.append(("provider", db.in_transaction()))
+        return {
+            "disposition": "review",
+            "review_required": True,
+            "metadata": {},
+        }
+
+    orchestrator.image_service.prepare_for_provider = prepare_image
+    orchestrator.provider.classify_routing = classify
+
+    orchestrator._process_asset(asset, [], plan, "job-id")
+
+    assert transaction_states == [("image", False), ("provider", False)]
+    prompt_run = db.query(PromptRun).filter(
+        PromptRun.asset_id == asset.id,
+    ).one()
+    assert prompt_run.status == "success"
+    assert db.query(RoutingPlanItem).filter(
+        RoutingPlanItem.asset_id == asset.id,
+    ).count() == 1
+
+
+def test_writeback_releases_transaction_during_immich_calls(db):
+    asset = _make_asset(db, "writeback-asset")
+    leaf = db.query(Bucket).filter(Bucket.user_id == TEST_USER_ID).first()
+    leaf.write_description = True
+    plan = RoutingPlanService(db, TEST_USER_ID).create_plan()
+    item = RoutingPlanItem(
+        id=str(uuid.uuid4()),
+        user_id=TEST_USER_ID,
+        plan_id=plan.id,
+        asset_id=asset.id,
+        primary_bucket_id=leaf.id,
+        suggested_description="Updated description",
+        status="approved",
+    )
+    db.add(item)
+    db.commit()
+
+    immich = MagicMock()
+
+    def update_description(_immich_id, _description):
+        assert not db.in_transaction()
+
+    immich.update_asset_description.side_effect = update_description
+
+    result = RoutingWritebackService(
+        db,
+        TEST_USER_ID,
+        immich_client=immich,
+    ).apply_item(item)
+
+    assert result.description_written is True
+    immich.update_asset_description.assert_called_once_with(
+        asset.immich_id,
+        "Updated description",
+    )
 
 
 def test_classification_rolls_back_before_logging_asset_failure(db):

@@ -1,6 +1,6 @@
 import os
 import logging
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from .config import settings
 
@@ -18,12 +18,30 @@ if _db_url.startswith("sqlite:///"):
 # the same connection (FastAPI's thread-pool request handling).
 _connect_args = {}
 if _db_url.startswith("sqlite"):
-    _connect_args = {"check_same_thread": False}
+    _connect_args = {
+        "check_same_thread": False,
+        "timeout": 30,
+    }
 
 engine = create_engine(
     _db_url,
     connect_args=_connect_args,
 )
+
+
+if _db_url.startswith("sqlite"):
+    _sqlite_is_memory = engine.url.database in (None, "", ":memory:")
+
+    @event.listens_for(engine, "connect")
+    def _configure_sqlite_connection(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA busy_timeout = 30000")
+            if not _sqlite_is_memory:
+                cursor.execute("PRAGMA journal_mode = WAL")
+        finally:
+            cursor.close()
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

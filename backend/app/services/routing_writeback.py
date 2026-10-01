@@ -49,13 +49,15 @@ class RoutingWritebackService:
         self.immich = immich_client or ImmichClient()
 
     def apply_item(self, item: RoutingPlanItem) -> RoutingWritebackResult:
-        result = RoutingWritebackResult(item.id)
+        item_id = item.id
+        result = RoutingWritebackResult(item_id)
         asset = self.db.query(Asset).filter(
             Asset.id == item.asset_id,
             Asset.user_id == self.user_id,
         ).first()
         if not asset:
             result.errors.append("Asset not found")
+            self.db.rollback()
             return result
 
         leaf: Optional[Bucket] = None
@@ -67,102 +69,122 @@ class RoutingWritebackService:
             )
         if not leaf:
             result.errors.append("Routing leaf missing or no longer available")
+            self.db.rollback()
             return result
 
         destination = leaf.destination_type or "virtual"
+        asset_id = asset.id
+        immich_id = asset.immich_id
+        leaf_id = leaf.id
+        leaf_path = leaf.path
+        write_description = bool(leaf.write_description)
+        write_tags = bool(leaf.write_tags)
+        write_location = bool(leaf.write_location)
+        description = item.suggested_description
+        tags = list(item.suggested_tags_json or [])
+        location = dict(item.suggested_location_json or {})
+        album_name = leaf.immich_album_name or leaf.path or leaf.name
+        target_album_id: Optional[str] = leaf.immich_album_id
+        create_album_if_missing = bool(leaf.create_album_if_missing)
+
+        self.db.rollback()
 
         # Description
-        if leaf.write_description and item.suggested_description:
+        if write_description and description:
             try:
-                self.immich.update_asset_description(asset.immich_id, item.suggested_description)
+                self.immich.update_asset_description(immich_id, description)
                 result.description_written = True
-                self._audit(asset.id, "routing_writeback_description", "success")
+                self._audit(asset_id, "routing_writeback_description", "success")
             except ImmichError as e:
                 msg = f"Failed to write description: {e}"
                 result.errors.append(msg)
-                self._audit(asset.id, "routing_writeback_description", "failed", error=msg)
+                self._audit(asset_id, "routing_writeback_description", "failed", error=msg)
 
         # Tags
-        if leaf.write_tags and item.suggested_tags_json:
+        if write_tags and tags:
             try:
-                tag_objects = self.immich.get_or_create_tags(list(item.suggested_tags_json))
+                tag_objects = self.immich.get_or_create_tags(tags)
                 if tag_objects:
-                    self.immich.tag_asset(asset.immich_id, [t["id"] for t in tag_objects])
+                    self.immich.tag_asset(immich_id, [t["id"] for t in tag_objects])
                     result.tags_written = True
-                    self._audit(asset.id, "routing_writeback_tags", "success",
+                    self._audit(asset_id, "routing_writeback_tags", "success",
                                 {"count": len(tag_objects)})
             except ImmichError as e:
                 msg = f"Failed to write tags: {e}"
                 result.errors.append(msg)
-                self._audit(asset.id, "routing_writeback_tags", "failed", error=msg)
+                self._audit(asset_id, "routing_writeback_tags", "failed", error=msg)
 
         # Location
-        if leaf.write_location and item.suggested_location_json:
-            loc = item.suggested_location_json
-            lat = loc.get("latitude") if isinstance(loc, dict) else None
-            lon = loc.get("longitude") if isinstance(loc, dict) else None
+        if write_location and location:
+            lat = location.get("latitude")
+            lon = location.get("longitude")
             if lat is not None and lon is not None:
                 try:
-                    self.immich.update_asset_location(asset.immich_id, float(lat), float(lon))
+                    self.immich.update_asset_location(immich_id, float(lat), float(lon))
                     result.location_written = True
-                    self._audit(asset.id, "routing_writeback_location", "success",
+                    self._audit(asset_id, "routing_writeback_location", "success",
                                 {"lat": lat, "lon": lon})
                 except (ImmichError, TypeError, ValueError) as e:
                     msg = f"Failed to write location: {e}"
                     result.errors.append(msg)
-                    self._audit(asset.id, "routing_writeback_location", "failed", error=msg)
+                    self._audit(asset_id, "routing_writeback_location", "failed", error=msg)
 
         # Destination-specific action
         if destination == "immich_trash":
             try:
-                self.immich.trash_assets([asset.immich_id])
+                self.immich.trash_assets([immich_id])
                 result.trashed = True
-                self._audit(asset.id, "routing_writeback_trash", "success",
-                            {"path": leaf.path})
+                self._audit(asset_id, "routing_writeback_trash", "success",
+                            {"path": leaf_path})
             except ImmichError as e:
                 msg = f"Failed to trash asset: {e}"
                 result.errors.append(msg)
-                self._audit(asset.id, "routing_writeback_trash", "failed", error=msg)
+                self._audit(asset_id, "routing_writeback_trash", "failed", error=msg)
         elif destination == "immich_album":
-            album_name = leaf.immich_album_name or leaf.path or leaf.name
-            target_album_id: Optional[str] = leaf.immich_album_id
             if not target_album_id:
-                if leaf.create_album_if_missing:
+                if create_album_if_missing:
                     try:
                         album = self.immich.get_or_create_album(album_name)
                         target_album_id = album.get("id") if album else None
                         if target_album_id:
-                            leaf.immich_album_id = target_album_id
-                            self.db.commit()
+                            self._save_album_id(leaf_id, target_album_id)
                     except ImmichError as e:
                         msg = f"Failed to create album '{album_name}': {e}"
                         result.errors.append(msg)
-                        self._audit(asset.id, "routing_writeback_album", "failed", error=msg)
+                        self._audit(asset_id, "routing_writeback_album", "failed", error=msg)
                 else:
                     album = self.immich.get_existing_album(album_name)
                     if album:
                         target_album_id = album.get("id")
-                        leaf.immich_album_id = target_album_id
-                        self.db.commit()
+                        self._save_album_id(leaf_id, target_album_id)
                     else:
                         msg = (
                             f"Album '{album_name}' not found and create_album_if_missing=false"
                         )
                         result.errors.append(msg)
-                        self._audit(asset.id, "routing_writeback_album", "failed", error=msg)
+                        self._audit(asset_id, "routing_writeback_album", "failed", error=msg)
             if target_album_id:
                 try:
-                    self.immich.add_asset_to_album(target_album_id, [asset.immich_id])
+                    self.immich.add_asset_to_album(target_album_id, [immich_id])
                     result.album_assigned = True
-                    self._audit(asset.id, "routing_writeback_album", "success",
+                    self._audit(asset_id, "routing_writeback_album", "success",
                                 {"album_id": target_album_id, "album_name": album_name})
                 except ImmichError as e:
                     msg = f"Failed to add asset to album: {e}"
                     result.errors.append(msg)
-                    self._audit(asset.id, "routing_writeback_album", "failed", error=msg)
+                    self._audit(asset_id, "routing_writeback_album", "failed", error=msg)
         # virtual / review_only — no Immich-side action
 
         return result
+
+    def _save_album_id(self, leaf_id: str, album_id: str) -> None:
+        leaf = self.db.query(Bucket).filter(
+            Bucket.id == leaf_id,
+            Bucket.user_id == self.user_id,
+        ).first()
+        if leaf:
+            leaf.immich_album_id = album_id
+            self.db.commit()
 
     def _audit(
         self,
