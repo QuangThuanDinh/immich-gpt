@@ -228,13 +228,21 @@ describe("Routing tree page", () => {
 
     fireEvent.click(screen.getByText("Matching"));
     await waitFor(() => expect(screen.getByText("sharp image")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Advanced AI" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to routing tree" }));
+    expect(screen.queryByText("Matching")).not.toBeInTheDocument();
+    expect(screen.getByText("Select a node to edit its settings.")).toBeInTheDocument();
   });
 
   it("can reprocess all assets from the routing menu", async () => {
     treeMock.mockResolvedValue({ nodes: [] });
     render(<Wrapper><Routing /></Wrapper>);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Run routing options" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Run Routing options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Reprocess all assets/i }));
 
     await waitFor(() => expect(classifyMock).toHaveBeenCalledWith({ force: true }));
@@ -252,7 +260,7 @@ describe("Routing plans page", () => {
     plansMock.mockResolvedValue([]);
     render(<Wrapper><RoutingPlans /></Wrapper>);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Run new plan" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Run Routing" }));
 
     await waitFor(() => expect(classifyMock).toHaveBeenCalledWith({ force: false }));
   });
@@ -290,6 +298,10 @@ describe("Routing plans page", () => {
     expect(screen.getByText("Write tags: 3 items")).toBeInTheDocument();
     expect(screen.getByText("Move to albums: 3 items")).toBeInTheDocument();
     expect(screen.queryByText(/Move to trash:/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to plans" }));
+    expect(screen.queryByText("Plan total")).not.toBeInTheDocument();
+    expect(screen.getByText(/ready · 5 items/i)).toBeInTheDocument();
   });
 
   it("approves a group via the Approve All button", async () => {

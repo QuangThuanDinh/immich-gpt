@@ -1,0 +1,76 @@
+.userIdentity {
+  min-width: 0;
+}
+
+.userEmail {
+  overflow-wrap: anywhere;
+}
+
+.actionList {
+  display: flex;
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .tableSurface {
+    overflow: visible !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  .table,
+  .table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .table thead {
+    display: none;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "user user"
+      "role status"
+      "actions actions";
+    gap: 10px 16px;
+    margin-bottom: 12px;
+    padding: 14px;
+    border: 1px solid #334155 !important;
+    border-radius: 10px;
+    background: #1e293b !important;
+  }
+
+  .userCell,
+  .roleCell,
+  .statusCell,
+  .actionsCell {
+    padding: 0 !important;
+  }
+
+  .userCell {
+    grid-area: user;
+  }
+
+  .roleCell {
+    grid-area: role;
+  }
+
+  .statusCell {
+    grid-area: status;
+    justify-self: end;
+  }
+
+  .actionsCell {
+    grid-area: actions;
+    padding-top: 2px !important;
+    border-top: 1px solid #334155;
+  }
+
+  .actionList {
+    padding-top: 10px;
+    flex-wrap: wrap;
+  }
+}

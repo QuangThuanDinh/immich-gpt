@@ -61,4 +61,13 @@ describe("AdminUsers", () => {
     expect(screen.getByText(/copied to your clipboard/i)).toBeInTheDocument();
     expect(screen.queryByText("sensitive-reset-token")).not.toBeInTheDocument();
   });
+
+  it("renders every user action", async () => {
+    renderPage();
+
+    expect(await screen.findByTitle("Disable")).toBeInTheDocument();
+    expect(screen.getByTitle("Reset password")).toBeInTheDocument();
+    expect(screen.getByTitle("Require password change")).toBeInTheDocument();
+    expect(screen.getByTitle("Delete user")).toBeInTheDocument();
+  });
 });

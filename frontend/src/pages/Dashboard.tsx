@@ -11,6 +11,8 @@ import type {
 } from "../types";
 import JobProgressBar from "../components/JobProgressBar";
 import JobDetail from "../components/JobDetail";
+import MobileSidebarToggle from "../components/MobileSidebarToggle";
+import RunRoutingButton from "../components/RunRoutingButton";
 import { usePageVisible } from "../hooks/usePageVisible";
 import {
   Database, Play, RefreshCw, AlertTriangle, CheckCircle,
@@ -45,7 +47,7 @@ function WorkflowPanel({
   onSync, onRoute, isLoading, disabled,
 }: {
   onSync: (scope: SyncScope, albumIds: string[] | undefined, runRoutingAfter: boolean) => void;
-  onRoute: () => void;
+  onRoute: (force: boolean) => void;
   isLoading: boolean;
   disabled: boolean;
 }) {
@@ -95,7 +97,7 @@ function WorkflowPanel({
 
   function handleRun() {
     if (workflowMode === "route") {
-      onRoute();
+      onRoute(false);
     } else {
       onSync(
         scope,
@@ -196,25 +198,27 @@ function WorkflowPanel({
         </>
       )}
 
-      <button
-        onClick={handleRun}
-        disabled={!canRun}
-        className={[styles.scopeBtn, canRun ? styles.scopeBtnActive : styles.scopeBtnInactive].join(" ")}
-        style={{
-          padding: "9px 20px",
-          marginTop: 4,
-          background: canRun ? (workflowMode === "route" ? "var(--color-purple)" : undefined) : undefined,
-        }}
-      >
-        {workflowMode === "sync" && <RefreshCw size={14} />}
-        {workflowMode === "sync_route" && <Layers size={14} />}
-        {workflowMode === "route" && <Play size={14} />}
-        {isLoading ? "Starting…" : (
-          workflowMode === "sync" ? "Start Sync" :
-          workflowMode === "sync_route" ? "Sync + Route" :
-          "Run Routing"
-        )}
-      </button>
+      {workflowMode === "route" ? (
+        <RunRoutingButton
+          label="Run Routing"
+          pending={!canRun}
+          onRun={onRoute}
+          primary
+        />
+      ) : (
+        <button
+          onClick={handleRun}
+          disabled={!canRun}
+          className={[styles.scopeBtn, canRun ? styles.scopeBtnActive : styles.scopeBtnInactive].join(" ")}
+          style={{ padding: "9px 20px", marginTop: 4 }}
+        >
+          {workflowMode === "sync" && <RefreshCw size={14} />}
+          {workflowMode === "sync_route" && <Layers size={14} />}
+          {isLoading ? "Starting…" : (
+            workflowMode === "sync" ? "Start Sync" : "Sync + Route"
+          )}
+        </button>
+      )}
     </div>
   );
 }
@@ -264,7 +268,7 @@ export default function Dashboard() {
   const pendingItems = pendingPlans.reduce((s, p) => s + p.item_count, 0);
 
   const routeMutation = useMutation({
-    mutationFn: () => startRoutingClassify({}),
+    mutationFn: (force: boolean) => startRoutingClassify({ force }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       qc.invalidateQueries({ queryKey: ["routing-plans"] });
@@ -298,7 +302,10 @@ export default function Dashboard() {
   return (
     <div className={styles.page}>
       <div className="pageHeader" style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: "var(--text-2xl)", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>Dashboard</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <MobileSidebarToggle />
+          <h1 style={{ fontSize: "var(--text-2xl)", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>Dashboard</h1>
+        </div>
         <p style={{ fontSize: "var(--text-md)", color: "var(--text-muted)", margin: "4px 0 0" }}>
           AI-first photo routing for Immich
         </p>
@@ -343,7 +350,7 @@ export default function Dashboard() {
         onSync={(scope, albumIds, runRoutingAfter) =>
           syncMutation.mutate({ scope, album_ids: albumIds, runRoutingAfter })
         }
-        onRoute={() => routeMutation.mutate()}
+        onRoute={(force) => routeMutation.mutate(force)}
         isLoading={syncMutation.isPending || routeMutation.isPending}
         disabled={!!activeJob}
       />

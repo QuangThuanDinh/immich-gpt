@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor, waitForElementToBeRemoved } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, waitForElementToBeRemoved } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -77,6 +77,8 @@ vi.mock("../services/api", async (importOriginal) => {
   };
 });
 
+import { startRoutingClassify } from "../services/api";
+
 function makeClient() {
   return new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -140,6 +142,27 @@ describe("App routing", () => {
     ));
   });
 
+  it("opens and closes the sidebar from the page heading", async () => {
+    render(
+      <Wrapper>
+        <App />
+      </Wrapper>
+    );
+
+    const openButton = await screen.findByRole("button", { name: "Open navigation" });
+    expect(openButton).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(openButton);
+
+    const closeButton = screen.getByRole("button", { name: "Close navigation", expanded: true });
+    expect(closeButton).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(closeButton);
+
+    expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
   it("renders the shared logo image", async () => {
     render(
       <Wrapper>
@@ -165,6 +188,19 @@ describe("App routing", () => {
       </Wrapper>
     );
     await waitFor(() => expect(screen.getAllByText("Jobs").length).toBeGreaterThanOrEqual(1));
+  });
+
+  it("can reprocess all assets from the Jobs routing menu", async () => {
+    render(
+      <Wrapper path="/jobs">
+        <App />
+      </Wrapper>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run Routing options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Reprocess all assets/i }));
+
+    await waitFor(() => expect(startRoutingClassify).toHaveBeenCalledWith({ force: true }));
   });
 
   it("renders settings page on /settings route", async () => {

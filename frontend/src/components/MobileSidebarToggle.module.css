@@ -1,0 +1,22 @@
+.button {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .button {
+    position: relative;
+    z-index: 60;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+}

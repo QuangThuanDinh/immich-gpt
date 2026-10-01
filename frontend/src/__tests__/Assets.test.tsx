@@ -55,15 +55,17 @@ describe("Assets page", () => {
     expect(image).toHaveAttribute("decoding", "async");
   });
 
-  it("requests 100 assets and allows a ten-card-wide grid", async () => {
+  it("requests 24 assets in the standard page width", async () => {
     renderPage();
 
     await waitFor(() => {
       expect(getAssets).toHaveBeenCalledWith(
-        expect.objectContaining({ page: 1, page_size: 100 })
+        expect.objectContaining({ page: 1, page_size: 24 })
       );
     });
-    expect(screen.getByTestId("assets-page")).toHaveStyle({ maxWidth: "1952px" });
+    const page = screen.getByTestId("assets-page");
+    expect(page).toHaveStyle({ maxWidth: "1100px" });
+    expect(page.style.margin).toBe("");
     expect(await screen.findByTestId("assets-grid")).toHaveStyle({
       gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
       gap: "12px",

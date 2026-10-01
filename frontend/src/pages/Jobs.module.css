@@ -19,6 +19,12 @@
   margin: 0;
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .subtitle {
   font-size: var(--text-md);
   color: var(--text-muted);
@@ -43,7 +49,6 @@
 }
 
 .btnBlue   { background: var(--color-blue);   color: #fff; }
-.btnPurple { background: var(--color-purple);  color: #fff; }
 
 .filter {
   margin-bottom: var(--space-5);
@@ -143,4 +148,18 @@
   color: var(--text-muted);
   padding: 32px;
   text-align: center;
+}
+
+@media (max-width: 900px) {
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }

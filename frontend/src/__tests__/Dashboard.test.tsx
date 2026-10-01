@@ -75,4 +75,16 @@ describe("Dashboard workflow", () => {
     });
     expect(mocks.startRoutingClassify).not.toHaveBeenCalled();
   });
+
+  it("can reprocess all assets from the routing workflow", async () => {
+    renderDashboard();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Route Only/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Routing options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Reprocess all assets/i }));
+
+    await waitFor(() => {
+      expect(mocks.startRoutingClassify).toHaveBeenCalledWith({ force: true });
+    });
+  });
 });

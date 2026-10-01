@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { getAuditLogs, getAuditLogCount, getJobs } from "../services/api";
 import LogPanel from "../components/LogPanel";
+import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import { usePageVisible } from "../hooks/usePageVisible";
 import type { AuditLog, JobRun } from "../types";
 import { CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Search, Copy, Check } from "lucide-react";
@@ -16,6 +17,7 @@ const sectionStyle: React.CSSProperties = {
   borderRadius: 12,
   padding: 20,
   marginBottom: 24,
+  overflowX: "auto",
 };
 
 function StatusIcon({ status }: { status?: string }) {
@@ -350,7 +352,10 @@ export default function Logs() {
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Logs</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <MobileSidebarToggle />
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Logs</h1>
+        </div>
         <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>
           Operational activity, write-back results, errors, and recent job output.
         </p>

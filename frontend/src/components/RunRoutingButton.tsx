@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, Play, RotateCcw } from "lucide-react";
+import styles from "./RunRoutingButton.module.css";
 
 interface RunRoutingButtonProps {
   label: string;
@@ -15,6 +16,7 @@ export default function RunRoutingButton({
   primary = false,
 }: RunRoutingButtonProps) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const background = primary ? "#1e40af" : "#1e293b";
   const color = primary ? "white" : "#22c55e";
@@ -39,8 +41,33 @@ export default function RunRoutingButton({
     };
   }, [open]);
 
+  const toggleMenu = () => {
+    if (!open && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const viewportPadding = 16;
+      const menuWidth = Math.min(260, window.innerWidth - viewportPadding * 2);
+      const left = Math.max(
+        viewportPadding,
+        Math.min(rect.left, window.innerWidth - menuWidth - viewportPadding),
+      );
+      const openAbove = window.innerHeight - rect.bottom < 120;
+
+      setMenuStyle({
+        position: "fixed",
+        left,
+        right: "auto",
+        width: menuWidth,
+        top: openAbove ? "auto" : rect.bottom + 6,
+        bottom: openAbove ? window.innerHeight - rect.top + 6 : "auto",
+      });
+    } else {
+      setMenuStyle({});
+    }
+    setOpen((value) => !value);
+  };
+
   return (
-    <div ref={containerRef} style={{ position: "relative", display: "flex" }}>
+    <div ref={containerRef} className={styles.container}>
       <button
         onClick={() => onRun(false)}
         disabled={pending}
@@ -66,7 +93,7 @@ export default function RunRoutingButton({
         aria-label={`${label} options`}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={toggleMenu}
         disabled={pending}
         style={{
           display: "flex",
@@ -85,12 +112,9 @@ export default function RunRoutingButton({
       {open && (
         <div
           role="menu"
+          className={styles.menu}
           style={{
-            position: "absolute",
-            right: 0,
-            top: "calc(100% + 6px)",
-            zIndex: 20,
-            width: 260,
+            ...menuStyle,
             padding: 6,
             borderRadius: 8,
             border: "1px solid #334155",

@@ -7,7 +7,9 @@ import {
 import { usePageVisible } from "../hooks/usePageVisible";
 import JobProgressBar from "../components/JobProgressBar";
 import JobDetail from "../components/JobDetail";
-import { RefreshCw, Play, XCircle, ChevronDown, ChevronUp, Pause, RotateCcw, Trash2 } from "lucide-react";
+import MobileSidebarToggle from "../components/MobileSidebarToggle";
+import RunRoutingButton from "../components/RunRoutingButton";
+import { RefreshCw, XCircle, ChevronDown, ChevronUp, Pause, RotateCcw, Trash2 } from "lucide-react";
 import styles from "./Jobs.module.css";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -38,7 +40,7 @@ export default function Jobs() {
   });
 
   const routeMut = useMutation({
-    mutationFn: () => startRoutingClassify({}),
+    mutationFn: (force: boolean) => startRoutingClassify({ force }),
     onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["jobs"] }); setExpandedJobId(d.job_id); },
   });
 
@@ -54,16 +56,22 @@ export default function Jobs() {
     <div className={styles.page}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Jobs</h1>
+          <div className={styles.titleRow}>
+            <MobileSidebarToggle />
+            <h1 className={styles.title}>Jobs</h1>
+          </div>
           <p className={styles.subtitle}>Background sync and routing classification jobs</p>
         </div>
         <div className={styles.actions}>
           <button onClick={() => syncMut.mutate()} disabled={syncMut.isPending || hasActiveJob} className={[styles.btn, styles.btnBlue].join(" ")}>
             <RefreshCw size={14} /> Sync All
           </button>
-          <button onClick={() => routeMut.mutate()} disabled={routeMut.isPending || hasActiveJob} className={[styles.btn, styles.btnPurple].join(" ")}>
-            <Play size={14} /> Run Routing
-          </button>
+          <RunRoutingButton
+            label="Run Routing"
+            pending={routeMut.isPending || hasActiveJob}
+            onRun={(force) => routeMut.mutate(force)}
+            primary
+          />
         </div>
       </div>
 

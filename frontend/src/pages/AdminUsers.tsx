@@ -10,6 +10,9 @@ import {
 import { copySecretToClipboard } from "../utils/clipboard";
 import { formatApiError } from "../utils/apiError";
 import { UserPlus, RefreshCw, Trash2, ShieldCheck, UserX, User, Key } from "lucide-react";
+import MobileSidebarToggle from "../components/MobileSidebarToggle";
+import responsive from "../styles/MasterDetail.module.css";
+import styles from "./AdminUsers.module.css";
 
 interface AdminUser {
   id: string;
@@ -67,31 +70,36 @@ export default function AdminUsers() {
 
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+      <div className={responsive.pageHeader} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>User Management</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <MobileSidebarToggle />
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>User Management</h1>
+          </div>
           <p style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>
             Admin view — account lifecycle only. No user content visible.
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "9px 16px",
-            background: "#0ea5e9",
-            color: "white",
-            border: "none",
-            borderRadius: 8,
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <UserPlus size={15} /> New user
-        </button>
+        <div className={responsive.pageActions} style={{ display: "flex" }}>
+          <button
+            onClick={() => setShowCreate(true)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "9px 16px",
+              background: "#0ea5e9",
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            <UserPlus size={15} /> New User
+          </button>
+        </div>
       </div>
 
       {showCreate && (
@@ -103,7 +111,7 @@ export default function AdminUsers() {
           marginBottom: 24,
         }}>
           <h3 style={{ color: "#f1f5f9", fontSize: 15, fontWeight: 600, margin: "0 0 16px" }}>Create user</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div className={responsive.twoColumn} style={{ marginBottom: 12 }}>
             {(["email", "username", "password"] as const).map(field => (
               <div key={field}>
                 <label style={{ display: "block", fontSize: 12, color: "#94a3b8", marginBottom: 4, textTransform: "capitalize" }}>
@@ -222,8 +230,8 @@ export default function AdminUsers() {
       {isLoading ? (
         <div style={{ color: "#64748b", fontSize: 14 }}>Loading users…</div>
       ) : (
-        <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 10, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div className={styles.tableSurface} style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 10, overflow: "hidden" }}>
+          <table className={styles.table} style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid #334155" }}>
                 {["User", "Role", "Status", "Actions"].map(h => (
@@ -243,20 +251,20 @@ export default function AdminUsers() {
             </thead>
             <tbody>
               {(users as AdminUser[]).map((u, idx) => (
-                <tr key={u.id} style={{
+                <tr key={u.id} className={styles.row} style={{
                   borderBottom: idx < users.length - 1 ? "1px solid #1e293b" : "none",
                   background: idx % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)",
                 }}>
-                  <td style={{ padding: "12px 16px" }}>
+                  <td className={styles.userCell} style={{ padding: "12px 16px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <User size={14} color="#64748b" />
-                      <div>
+                      <div className={styles.userIdentity}>
                         <div style={{ color: "#f1f5f9", fontSize: 14, fontWeight: 500 }}>{u.username}</div>
-                        <div style={{ color: "#64748b", fontSize: 12 }}>{u.email}</div>
+                        <div className={styles.userEmail} style={{ color: "#64748b", fontSize: 12 }}>{u.email}</div>
                       </div>
                     </div>
                   </td>
-                  <td style={{ padding: "12px 16px" }}>
+                  <td className={styles.roleCell} style={{ padding: "12px 16px" }}>
                     <span style={{
                       background: u.role === "admin" ? "rgba(139,92,246,0.15)" : "rgba(56,189,248,0.1)",
                       color: u.role === "admin" ? "#a78bfa" : "#38bdf8",
@@ -268,7 +276,7 @@ export default function AdminUsers() {
                       {u.role}
                     </span>
                   </td>
-                  <td style={{ padding: "12px 16px" }}>
+                  <td className={styles.statusCell} style={{ padding: "12px 16px" }}>
                     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                       <span style={{
                         background: u.is_active ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
@@ -292,8 +300,8 @@ export default function AdminUsers() {
                       )}
                     </div>
                   </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
+                  <td className={styles.actionsCell} style={{ padding: "12px 16px" }}>
+                    <div className={styles.actionList}>
                       <ActionBtn
                         title={u.is_active ? "Disable" : "Enable"}
                         icon={u.is_active ? <UserX size={13} /> : <ShieldCheck size={13} />}

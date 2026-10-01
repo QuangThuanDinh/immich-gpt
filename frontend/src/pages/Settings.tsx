@@ -15,6 +15,8 @@ import {
 import type { ProviderConfig } from "../types";
 import { formatApiError } from "../utils/apiError";
 import { CheckCircle, AlertTriangle, Plus, Trash2, Pencil, Heart, Github, Scale } from "lucide-react";
+import MobileSidebarToggle from "../components/MobileSidebarToggle";
+import responsive from "../styles/MasterDetail.module.css";
 
 const inputStyle: React.CSSProperties = {
   background: "#1e293b",
@@ -162,7 +164,7 @@ function ModelPickerForm({
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+    <div className={responsive.twoColumn} style={{ marginBottom: 12 }}>
       <div>
         <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>Provider</label>
         {isEditing ? (
@@ -277,7 +279,7 @@ function ProviderFormPanel({
             style={inputStyle}
             placeholder="https://api.openai.com/v1"
           />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+          <div className={responsive.twoColumn} style={{ marginTop: 12 }}>
             <div>
               <label style={{ fontSize: 12, color: "#64748b", display: "block", marginBottom: 4 }}>
                 Azure API Version (optional)
@@ -731,7 +733,10 @@ export default function Settings() {
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
       <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Settings</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <MobileSidebarToggle />
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Settings</h1>
+        </div>
         <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>
           Configure Immich connection and AI providers
         </p>

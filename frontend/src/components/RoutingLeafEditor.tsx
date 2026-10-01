@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getRoutingPromptPreview,
@@ -7,6 +7,9 @@ import {
   deleteRoutingExample,
 } from "../services/api";
 import type { RoutingNode, PrivacyAction } from "../types";
+import { ChevronLeft } from "lucide-react";
+import responsive from "../styles/MasterDetail.module.css";
+import styles from "./RoutingLeafEditor.module.css";
 
 const inputStyle: React.CSSProperties = {
   background: "#1e293b",
@@ -30,6 +33,8 @@ const TAB_DEFS: { key: TabKey; label: string }[] = [
   { key: "examples", label: "Examples" },
   { key: "advanced", label: "Advanced AI" },
 ];
+
+const MOBILE_PRIMARY_TABS = new Set<TabKey>(["general", "matching"]);
 
 type TabKey =
   | "general"
@@ -104,16 +109,37 @@ interface Props {
   node: RoutingNode;
   onSave: (data: Partial<RoutingNode>) => void;
   saving: boolean;
+  onBack?: () => void;
 }
 
-export default function RoutingLeafEditor({ node, onSave, saving }: Props) {
+export default function RoutingLeafEditor({ node, onSave, saving, onBack }: Props) {
   const [tab, setTab] = useState<TabKey>("general");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
   // Keyed by node.id at the parent level — re-mounts on selection change,
   // so we initialise from `node` once per mount.
   const [form, setForm] = useState<RoutingNode>(node);
 
   const set = <K extends keyof RoutingNode>(k: K, v: RoutingNode[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (!moreOpen) return;
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [moreOpen]);
 
   const setPrivacy = (flag: string, action: PrivacyAction) => {
     setForm((f) => ({
@@ -166,11 +192,23 @@ export default function RoutingLeafEditor({ node, onSave, saving }: Props) {
   return (
     <div style={{ padding: 20 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div>
-          <div style={{ fontSize: 11, color: "#64748b" }}>{form.path}</div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9", margin: "2px 0 0" }}>
-            {form.name}
-          </h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          {onBack && (
+            <button
+              type="button"
+              className={responsive.headerBackButton}
+              onClick={onBack}
+              aria-label="Back to routing tree"
+            >
+              <ChevronLeft size={20} />
+            </button>
+          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: "#64748b" }}>{form.path}</div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9", margin: "2px 0 0" }}>
+              {form.name}
+            </h2>
+          </div>
         </div>
         <button
           onClick={saveDraft}
@@ -185,10 +223,14 @@ export default function RoutingLeafEditor({ node, onSave, saving }: Props) {
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid #1e293b" }}>
+      <div className={styles.tabs}>
         {TAB_DEFS.map((t) => (
           <button
             key={t.key}
+            className={[
+              styles.tab,
+              MOBILE_PRIMARY_TABS.has(t.key) ? "" : styles.mobileOverflowTab,
+            ].join(" ")}
             onClick={() => setTab(t.key)}
             style={{
               padding: "7px 12px", border: "none", borderRadius: 0,
@@ -201,6 +243,41 @@ export default function RoutingLeafEditor({ node, onSave, saving }: Props) {
             {t.label}
           </button>
         ))}
+        <div ref={moreRef} className={styles.moreContainer}>
+          <button
+            type="button"
+            className={[
+              styles.moreButton,
+              MOBILE_PRIMARY_TABS.has(tab) ? "" : styles.moreButtonActive,
+            ].join(" ")}
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((open) => !open)}
+          >
+            More
+          </button>
+          {moreOpen && (
+            <div role="menu" className={styles.moreMenu}>
+              {TAB_DEFS.filter((item) => !MOBILE_PRIMARY_TABS.has(item.key)).map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="menuitem"
+                  className={[
+                    styles.moreMenuItem,
+                    tab === item.key ? styles.moreMenuItemActive : "",
+                  ].join(" ")}
+                  onClick={() => {
+                    setTab(item.key);
+                    setMoreOpen(false);
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {tab === "general" && (

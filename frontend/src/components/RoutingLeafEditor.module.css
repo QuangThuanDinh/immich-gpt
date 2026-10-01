@@ -1,0 +1,78 @@
+.tabs {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.tab {
+  flex-shrink: 0;
+}
+
+.moreContainer {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .tabs {
+    max-width: 100%;
+  }
+
+  .mobileOverflowTab {
+    display: none;
+  }
+
+  .moreContainer {
+    position: relative;
+    display: block;
+    margin-left: auto;
+  }
+
+  .moreButton {
+    padding: 7px 12px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .moreButtonActive {
+    border-bottom-color: #38bdf8;
+    color: #38bdf8;
+  }
+
+  .moreMenu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 30;
+    width: 180px;
+    padding: 6px;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background: #0f172a;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  .moreMenuItem {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #cbd5e1;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .moreMenuItemActive {
+    background: rgba(56, 189, 248, 0.1);
+    color: #38bdf8;
+  }
+}

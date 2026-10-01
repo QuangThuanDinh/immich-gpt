@@ -6,12 +6,13 @@ import {
 } from "../services/api";
 import type { Asset } from "../types";
 import AssetDetailPanel from "../components/AssetDetailPanel";
+import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import {
   Search, Image as ImageIcon, ArrowUp, ArrowDown, ArrowUpDown,
   Star,
 } from "lucide-react";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 24;
 
 type SortKey = "date" | "filename" | "location" | "tags" | "type";
 type SortDir = "asc" | "desc";
@@ -157,9 +158,12 @@ export default function Assets() {
   }
 
   return (
-    <div data-testid="assets-page" style={{ padding: "32px 40px", maxWidth: 1952, margin: "0 auto" }}>
+    <div data-testid="assets-page" style={{ padding: "32px 40px", maxWidth: 1100 }}>
       <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Assets</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <MobileSidebarToggle />
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Assets</h1>
+        </div>
         <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>
           Browse synced Immich assets. Routing decisions live under{" "}
           <a href="/routing/plans" style={{ color: "#38bdf8" }}>Routing plans</a>.

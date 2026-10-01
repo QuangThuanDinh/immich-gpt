@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../contexts/useAuth";
+import SidebarContext from "../contexts/SidebarContext";
 import { useJobCompletion } from "../hooks/useJobCompletion";
 import BrandLogo from "./BrandLogo";
 import {
@@ -24,11 +25,29 @@ const DONATE_URL =
 
 export default function Layout() {
   const { user, logout, isAdmin } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   useJobCompletion();
 
   return (
-    <div className={styles.root}>
-      <nav className={styles.sidebar}>
+    <SidebarContext.Provider
+      value={{
+        isOpen: sidebarOpen,
+        toggle: () => setSidebarOpen((open) => !open),
+        close: () => setSidebarOpen(false),
+      }}
+    >
+      <div className={styles.root}>
+      <button
+        type="button"
+        className={[styles.backdrop, sidebarOpen ? styles.backdropVisible : ""].join(" ")}
+        onClick={() => setSidebarOpen(false)}
+        aria-label="Close navigation"
+        tabIndex={sidebarOpen ? 0 : -1}
+      />
+      <nav
+        id="app-sidebar"
+        className={[styles.sidebar, sidebarOpen ? styles.sidebarOpen : ""].join(" ")}
+      >
         <div className={styles.logo}>
           <BrandLogo size="sidebar" />
         </div>
@@ -39,6 +58,7 @@ export default function Layout() {
               key={path}
               to={path}
               end={exact}
+              onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
                 [styles.navLink, isActive ? styles.navLinkActive : ""].join(" ")
               }
@@ -52,6 +72,7 @@ export default function Layout() {
             <div className={styles.navAdmin}>
               <NavLink
                 to="/admin/users"
+                onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) =>
                   [styles.navLink, styles.navAdminLink, isActive ? styles.navAdminLinkActive : ""].join(" ")
                 }
@@ -89,6 +110,7 @@ export default function Layout() {
       <main className={styles.main}>
         <Outlet />
       </main>
-    </div>
+      </div>
+    </SidebarContext.Provider>
   );
 }

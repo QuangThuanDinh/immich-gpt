@@ -12,7 +12,9 @@ import { usePageVisible } from "../hooks/usePageVisible";
 import RunRoutingButton from "../components/RunRoutingButton";
 import RoutingPlanGroup from "../components/RoutingPlanGroup";
 import AssetDetailPanel from "../components/AssetDetailPanel";
-import { CheckCircle2, AlertTriangle, Trash2, XCircle, Clock, type LucideIcon } from "lucide-react";
+import MobileSidebarToggle from "../components/MobileSidebarToggle";
+import masterDetail from "../styles/MasterDetail.module.css";
+import { CheckCircle2, AlertTriangle, Trash2, XCircle, Clock, ChevronLeft, type LucideIcon } from "lucide-react";
 
 const GROUP_DEFS: {
   key: keyof RoutingPlanSummary["groups"];
@@ -40,6 +42,11 @@ export default function RoutingPlans() {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const closePlan = () => {
+    setSelectedPlanId(null);
+    setExpandedGroupId(null);
+    setSelectedAssetId(null);
+  };
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useQuery<RoutingPlanSummary>({
     queryKey: ["routing-plan-summary", selectedPlanId],
@@ -65,24 +72,29 @@ export default function RoutingPlans() {
   });
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 1952 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
+      <div className={masterDetail.pageHeader} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Routing plans</h1>
+          <div className={masterDetail.titleRow}>
+            <MobileSidebarToggle />
+            <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Routing plans</h1>
+          </div>
           <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>
             Review and apply batches of AI routing decisions.
           </p>
         </div>
-        <RunRoutingButton
-          label="Run new plan"
-          pending={classifyMut.isPending}
-          onRun={(force) => classifyMut.mutate(force)}
-          primary
-        />
+        <div className={masterDetail.pageActions} style={{ display: "flex" }}>
+          <RunRoutingButton
+            label="Run Routing"
+            pending={classifyMut.isPending}
+            onRun={(force) => classifyMut.mutate(force)}
+            primary
+          />
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 24 }}>
-        <div style={{
+      <div className={masterDetail.layout}>
+        <div className={[masterDetail.master, selectedPlanId ? masterDetail.masterHidden : ""].join(" ")} style={{
           background: "#0f172a", border: "1px solid #1e293b",
           borderRadius: 12, padding: 16,
         }}>
@@ -121,7 +133,7 @@ export default function RoutingPlans() {
           ))}
         </div>
 
-        <div>
+        <div className={[masterDetail.detail, selectedPlanId ? "" : masterDetail.detailHidden].join(" ")}>
           {!selectedPlanId && (
             <div style={{
               padding: 32, textAlign: "center",
@@ -133,20 +145,26 @@ export default function RoutingPlans() {
           )}
           {selectedPlanId && summaryLoading && (
             <div style={{
-              padding: 32, textAlign: "center",
+              padding: 32, textAlign: "center", display: "flex", alignItems: "center", gap: 10,
               background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12,
               color: "#64748b",
             }}>
-              Loading plan summary...
+              <button type="button" className={masterDetail.headerBackButton} onClick={closePlan} aria-label="Back to plans">
+                <ChevronLeft size={20} />
+              </button>
+              <span>Loading plan summary...</span>
             </div>
           )}
           {selectedPlanId && summaryError && (
             <div style={{
-              padding: 32, textAlign: "center",
+              padding: 32, textAlign: "center", display: "flex", alignItems: "center", gap: 10,
               background: "#0f172a", border: "1px solid #7f1d1d", borderRadius: 12,
               color: "#fca5a5",
             }}>
-              Could not load this plan summary. Try selecting it again.
+              <button type="button" className={masterDetail.headerBackButton} onClick={closePlan} aria-label="Back to plans">
+                <ChevronLeft size={20} />
+              </button>
+              <span>Could not load this plan summary. Try selecting it again.</span>
             </div>
           )}
           {selectedPlanId && summary && (
@@ -156,11 +174,15 @@ export default function RoutingPlans() {
                 borderRadius: 12, padding: 16, marginBottom: 16,
                 display: "flex", alignItems: "center", justifyContent: "space-between",
               }}>
-                <div>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>Plan total</div>
-                  <div style={{ fontSize: 20, color: "#f1f5f9", fontWeight: 700 }}>
-                    {summary.total} item{summary.total === 1 ? "" : "s"}
-                  </div>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <button type="button" className={masterDetail.headerBackButton} onClick={closePlan} aria-label="Back to plans">
+                    <ChevronLeft size={20} />
+                  </button>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Plan total</div>
+                    <div style={{ fontSize: 20, color: "#f1f5f9", fontWeight: 700 }}>
+                      {summary.total} item{summary.total === 1 ? "" : "s"}
+                    </div>
                   <div style={{ display: "grid", gap: 2, marginTop: 8 }}>
                     {(summary.writeback?.write_description ?? 0) > 0 && (
                       <div style={{ fontSize: 11, color: "#94a3b8" }}>
@@ -200,6 +222,7 @@ export default function RoutingPlans() {
                       Could not apply approved items.
                     </div>
                   )}
+                  </div>
                 </div>
                 <button
                   onClick={() => applyMut.mutate()}

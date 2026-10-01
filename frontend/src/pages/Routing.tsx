@@ -11,6 +11,8 @@ import {
 import type { RoutingNode } from "../types";
 import RoutingLeafEditor from "../components/RoutingLeafEditor";
 import RunRoutingButton from "../components/RunRoutingButton";
+import MobileSidebarToggle from "../components/MobileSidebarToggle";
+import masterDetail from "../styles/MasterDetail.module.css";
 import {
   Plus,
   Trash2,
@@ -75,27 +77,30 @@ function NodeRow({
         }}
         onClick={() => onSelect(node.id)}
       >
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (hasChildren) toggle(node.id);
-          }}
-          style={{
-            width: 20,
-            background: "transparent",
-            border: "none",
-            color: "#64748b",
-            cursor: hasChildren ? "pointer" : "default",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          {hasChildren ? (
-            isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />
-          ) : (
-            <span style={{ width: 14 }} />
-          )}
-        </button>
+        {hasChildren ? (
+          <button
+            type="button"
+            aria-label={isOpen ? `Collapse ${node.name}` : `Expand ${node.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggle(node.id);
+            }}
+            style={{
+              width: 20,
+              padding: 0,
+              background: "transparent",
+              border: "none",
+              color: "#64748b",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+        ) : (
+          <span className={masterDetail.leafSpacer} aria-hidden="true" />
+        )}
         {isLeaf ? <Folder size={14} color="#38bdf8" /> : <FolderTree size={14} color="#a78bfa" />}
         <div style={{ flex: 1, fontSize: 13, color: "#e2e8f0" }}>
           {node.name}
@@ -258,35 +263,39 @@ export default function Routing() {
   };
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 1952, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
+      <div className={masterDetail.pageHeader} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Routing tree</h1>
+          <div className={masterDetail.titleRow}>
+            <MobileSidebarToggle />
+            <h1 style={{ fontSize: 24, fontWeight: 700, color: "#f1f5f9", margin: 0 }}>Routing tree</h1>
+          </div>
           <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>
             Where should each photo go? Manage destinations, rules, and automation.
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <RunRoutingButton
-            label="Run routing"
-            pending={classifyMut.isPending}
-            onRun={(force) => classifyMut.mutate(force)}
-          />
+        <div className={masterDetail.pageActions} style={{ display: "flex", gap: 8 }}>
           <button
             onClick={handleAddRoot}
             style={{
               display: "flex", alignItems: "center", gap: 6,
               padding: "8px 16px", borderRadius: 8, border: "none",
-              background: "#1e40af", color: "white", fontSize: 13, fontWeight: 600, cursor: "pointer",
+              background: "#16a34a", color: "white", fontSize: 13, fontWeight: 600, cursor: "pointer",
             }}
           >
-            <Plus size={13} /> Add root
+            <Plus size={13} /> Add Root
           </button>
+          <RunRoutingButton
+            label="Run Routing"
+            pending={classifyMut.isPending}
+            onRun={(force) => classifyMut.mutate(force)}
+            primary
+          />
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 24 }}>
-        <div style={{
+      <div className={masterDetail.layout}>
+        <div className={[masterDetail.master, masterDetail.flushMaster, selected ? masterDetail.masterHidden : ""].join(" ")} style={{
           background: "#0f172a", border: "1px solid #1e293b",
           borderRadius: 12, padding: 16, minHeight: 400,
         }}>
@@ -294,7 +303,7 @@ export default function Routing() {
             <div style={{ color: "#64748b", fontSize: 13 }}>Loading…</div>
           ) : tree.length === 0 ? (
             <div style={{ color: "#64748b", fontSize: 13 }}>
-              No routing destinations yet. Click "Add root" to create your first one.
+              No routing destinations yet. Click "Add Root" to create your first one.
             </div>
           ) : (
             tree.map((n) => (
@@ -358,7 +367,8 @@ export default function Routing() {
           )}
         </div>
 
-        <div style={{
+        <div className={[masterDetail.detail, selected ? "" : masterDetail.detailHidden].join(" ")}>
+          <div style={{
           background: "#0f172a", border: "1px solid #1e293b",
           borderRadius: 12, padding: 0, minHeight: 400,
         }}>
@@ -368,6 +378,7 @@ export default function Routing() {
               node={selected}
               onSave={(data) => updateMut.mutate({ id: selected.id, data })}
               saving={updateMut.isPending}
+              onBack={() => setSelectedId(null)}
             />
           ) : (
             <div style={{
@@ -378,6 +389,7 @@ export default function Routing() {
               <div style={{ marginTop: 12 }}>Select a node to edit its settings.</div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>
