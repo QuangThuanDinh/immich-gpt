@@ -731,7 +731,7 @@ function AboutSection() {
 
 export default function Settings() {
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1400 }}>
       <div style={{ marginBottom: 32 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <MobileSidebarToggle />

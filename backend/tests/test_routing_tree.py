@@ -22,6 +22,13 @@ def test_create_root_node(db):
     assert node.is_leaf is True
 
 
+def test_create_ignores_manual_leaf_status(db):
+    _seed_clean_tree(db)
+    svc = RoutingTreeService(db, TEST_USER_ID)
+    node = svc.create_node(RoutingNodeCreate(name="Business", is_leaf=False))
+    assert node.is_leaf is True
+
+
 def test_create_child_leaf(db):
     _seed_clean_tree(db)
     svc = RoutingTreeService(db, TEST_USER_ID)
@@ -94,7 +101,21 @@ def test_move_node_updates_paths(db):
     )
     svc.move_node(leaf.id, personal.id)
     db.refresh(leaf)
+    db.refresh(biz)
+    db.refresh(personal)
     assert leaf.path == "Personal/Lake"
+    assert biz.is_leaf is True
+    assert personal.is_leaf is False
+
+
+def test_delete_last_child_promotes_parent_to_leaf(db):
+    _seed_clean_tree(db)
+    svc = RoutingTreeService(db, TEST_USER_ID)
+    parent = svc.create_node(RoutingNodeCreate(name="Business"))
+    child = svc.create_node(RoutingNodeCreate(name="Job Photos", parent_id=parent.id))
+    svc.delete_node(child.id)
+    db.refresh(parent)
+    assert parent.is_leaf is True
 
 
 def test_cannot_move_node_into_descendant(db):

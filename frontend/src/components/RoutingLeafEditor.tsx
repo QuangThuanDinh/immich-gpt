@@ -204,7 +204,9 @@ export default function RoutingLeafEditor({ node, onSave, saving, onBack }: Prop
             </button>
           )}
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 11, color: "#64748b" }}>{form.path}</div>
+            <div style={{ fontSize: 11, color: "#64748b" }}>
+              {form.path.split("/").join(" / ")}
+            </div>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9", margin: "2px 0 0" }}>
               {form.name}
             </h2>
@@ -311,23 +313,6 @@ export default function RoutingLeafEditor({ node, onSave, saving, onBack }: Prop
               onChange={(v) => set("enabled", v)}
             />
           </Row>
-          <Row>
-            <Toggle
-              label="Exclusive (no secondaries)"
-              checked={form.exclusive}
-              onChange={(v) => set("exclusive", v)}
-            />
-            <Toggle
-              label="Allow as secondary"
-              checked={form.allow_secondary}
-              onChange={(v) => set("allow_secondary", v)}
-            />
-          </Row>
-          <Toggle
-            label="Is leaf (selectable destination)"
-            checked={form.is_leaf}
-            onChange={(v) => set("is_leaf", v)}
-          />
         </div>
       )}
 

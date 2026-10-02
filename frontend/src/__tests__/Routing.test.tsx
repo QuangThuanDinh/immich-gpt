@@ -197,7 +197,7 @@ describe("Routing tree page", () => {
     await waitFor(() => expect(createMock).toHaveBeenCalled());
     const firstCallArg = createMock.mock.calls[0]?.[0];
     expect(firstCallArg).toEqual(
-      expect.objectContaining({ name: "Family", parent_id: null, is_leaf: true })
+      expect.objectContaining({ name: "Family", parent_id: null })
     );
   });
 
@@ -225,6 +225,9 @@ describe("Routing tree page", () => {
     await waitFor(() => expect(screen.getAllByText("Lake House").length).toBeGreaterThan(0));
     fireEvent.click(screen.getAllByText("Lake House")[0]);
     await waitFor(() => expect(screen.getByText("Matching")).toBeInTheDocument());
+    expect(screen.queryByText("Exclusive (no secondaries)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Allow as secondary")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Is leaf/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Matching"));
     await waitFor(() => expect(screen.getByText("sharp image")).toBeInTheDocument());

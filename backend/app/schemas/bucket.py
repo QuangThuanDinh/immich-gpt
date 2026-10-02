@@ -15,7 +15,6 @@ VALID_QUALITY_LEVELS = {"any", "usable", "high"}
 class RoutingNodeCreate(BaseModel):
     name: str
     parent_id: Optional[str] = None
-    is_leaf: bool = True
     description: Optional[str] = None
     enabled: bool = True
     priority: int = 100
@@ -59,7 +58,6 @@ class RoutingNodeCreate(BaseModel):
 class RoutingNodeUpdate(BaseModel):
     name: Optional[str] = None
     parent_id: Optional[str] = None
-    is_leaf: Optional[bool] = None
     description: Optional[str] = None
     enabled: Optional[bool] = None
     priority: Optional[int] = None

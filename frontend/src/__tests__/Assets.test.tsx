@@ -64,7 +64,7 @@ describe("Assets page", () => {
       );
     });
     const page = screen.getByTestId("assets-page");
-    expect(page).toHaveStyle({ maxWidth: "1100px" });
+    expect(page).toHaveStyle({ maxWidth: "1400px" });
     expect(page.style.margin).toBe("");
     expect(await screen.findByTestId("assets-grid")).toHaveStyle({
       gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",

@@ -158,7 +158,7 @@ export default function Assets() {
   }
 
   return (
-    <div data-testid="assets-page" style={{ padding: "32px 40px", maxWidth: 1100 }}>
+    <div data-testid="assets-page" style={{ padding: "32px 40px", maxWidth: 1400 }}>
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <MobileSidebarToggle />

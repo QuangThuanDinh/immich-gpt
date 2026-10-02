@@ -69,7 +69,7 @@ export default function AdminUsers() {
   });
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1400 }}>
       <div className={responsive.pageHeader} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

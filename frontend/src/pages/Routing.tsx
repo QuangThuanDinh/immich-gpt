@@ -258,12 +258,11 @@ export default function Routing() {
     createMut.mutate({
       name: newName.trim(),
       parent_id: creatingUnder ?? null,
-      is_leaf: true,
     });
   };
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1400 }}>
       <div className={masterDetail.pageHeader} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
           <div className={masterDetail.titleRow}>

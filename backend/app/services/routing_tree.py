@@ -125,7 +125,7 @@ class RoutingTreeService:
             parent_id=parent.id if parent else None,
             name=data.name,
             path=path,
-            is_leaf=data.is_leaf,
+            is_leaf=True,
             description=data.description,
             enabled=data.enabled,
             priority=data.priority,
@@ -158,12 +158,10 @@ class RoutingTreeService:
             automation_rules_json=data.automation_rules,
             metadata_rules_json=data.metadata_rules,
         )
-        # If creating under a parent that is currently a leaf, demote it
-        # to a parent (parents are organizational only).
-        if parent and parent.is_leaf:
-            parent.is_leaf = False
-
         self.db.add(node)
+        self.db.flush()
+        if parent:
+            self._sync_leaf_status(parent.id)
         self.db.commit()
         self.db.refresh(node)
         return node
@@ -201,7 +199,6 @@ class RoutingTreeService:
             "suggest_description", "suggest_tags", "suggest_location", "suggest_caption",
             "write_description", "write_tags", "write_location",
             "custom_prompt_enabled", "custom_prompt",
-            "is_leaf",
         )
         for field in scalar_fields:
             value = getattr(data, field)
@@ -258,14 +255,18 @@ class RoutingTreeService:
             if self._is_descendant(new_parent, node):
                 raise RoutingTreeError("Cannot move a node into one of its descendants")
 
+        old_parent_id = node.parent_id
         old_path = node.path or node.name
         node.parent_id = new_parent.id if new_parent else None
         node.path = self._compute_path(node.name, new_parent)
         self._check_unique_path(node.path, ignore_id=node.id)
         self._rewrite_descendant_paths(old_prefix=old_path, new_prefix=node.path)
 
-        if new_parent and new_parent.is_leaf:
-            new_parent.is_leaf = False
+        self.db.flush()
+        if old_parent_id:
+            self._sync_leaf_status(old_parent_id)
+        if new_parent:
+            self._sync_leaf_status(new_parent.id)
 
         self.db.commit()
         self.db.refresh(node)
@@ -273,6 +274,7 @@ class RoutingTreeService:
 
     def delete_node(self, node_id: str, cascade: bool = False) -> None:
         node = self.get_node(node_id)
+        parent_id = node.parent_id
         children = (
             self.db.query(Bucket)
             .filter(Bucket.parent_id == node.id, Bucket.user_id == self.user_id)
@@ -286,6 +288,9 @@ class RoutingTreeService:
             for child in children:
                 self.delete_node(child.id, cascade=True)
         self.db.delete(node)
+        self.db.flush()
+        if parent_id:
+            self._sync_leaf_status(parent_id)
         self.db.commit()
 
     def duplicate_node(self, node_id: str) -> Bucket:
@@ -307,7 +312,7 @@ class RoutingTreeService:
             parent_id=node.parent_id,
             name=copy_name,
             path=self._compute_path(copy_name, parent),
-            is_leaf=node.is_leaf,
+            is_leaf=True,
             description=node.description,
             enabled=node.enabled,
             priority=node.priority,
@@ -348,6 +353,18 @@ class RoutingTreeService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _sync_leaf_status(self, node_id: str) -> None:
+        node = self._get_or_none(node_id)
+        if not node:
+            return
+        has_children = (
+            self.db.query(Bucket.id)
+            .filter(Bucket.parent_id == node_id, Bucket.user_id == self.user_id)
+            .first()
+            is not None
+        )
+        node.is_leaf = not has_children
 
     def serialize(self, node: Bucket) -> Dict[str, Any]:
         return {

@@ -350,7 +350,7 @@ export default function Logs() {
   const jobsWithOutput = recentJobs.filter((job) => (job.log_lines?.length ?? 0) > 0 || Boolean(job.message));
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 1100 }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1400 }}>
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <MobileSidebarToggle />

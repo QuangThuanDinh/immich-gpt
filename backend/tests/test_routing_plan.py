@@ -764,6 +764,7 @@ def test_update_plan_item_rejects_disabled_or_parent_destination(client, db):
     tree = RoutingTreeService(db, TEST_USER_ID)
     source = tree.create_node(RoutingNodeCreate(name="Source"))
     parent = tree.create_node(RoutingNodeCreate(name="Parent", is_leaf=False))
+    tree.create_node(RoutingNodeCreate(name="Child", parent_id=parent.id))
     disabled = tree.create_node(RoutingNodeCreate(name="Disabled", enabled=False))
     plan_svc = RoutingPlanService(db, TEST_USER_ID)
     plan = plan_svc.create_plan()
