@@ -32,6 +32,7 @@ immich-gpt is a self-hosted web app that connects to your Immich library, pulls 
 - [API and health endpoints](#api-and-health-endpoints)
 - [Architecture](#architecture)
 - [Development](#development)
+- [Enhancements in this fork](#enhancements-in-this-fork)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -345,6 +346,18 @@ npx vite build
 That build writes static assets into `backend/static` so FastAPI can serve the SPA in production.
 
 See [`docs/development.md`](docs/development.md) for local run commands, migrations, and contributor workflow details.
+
+## Enhancements in this fork
+
+Compared with the original project, this fork includes:
+
+- [x] Custom API base URLs for OpenAI, Azure OpenAI, and OpenRouter
+- [x] Responsive, mobile-friendly pages and review workflows
+- [x] A persistent Evaluation workspace for testing tags and routing destinations with normalized scoring
+- [x] Portable JSON import and export for Evaluation settings and complete Routing Tree configurations
+- [x] Configurable per-user parallel AI processing for Evaluation and Routing jobs
+- [x] Improved routing-plan review with grouped and per-item actions plus immediate approved write-back
+- [x] Live Photo motion-asset filtering to avoid processing companion video files as separate photos
 
 ## Roadmap
 
