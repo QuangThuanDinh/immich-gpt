@@ -204,6 +204,14 @@ A safe rollout looks like this:
 - per-leaf positive and negative criteria
 - destination-specific metadata and write-back options
 - optional custom prompt guidance and prompt preview
+- import and export the complete root and leaf configuration as portable JSON
+
+### Evaluation
+
+- save representative Immich images with expected tags and destinations
+- verify required tags, forbidden tags, and routing destinations with normalized scoring
+- run dry-run AI evaluations without creating plans or writing changes to Immich
+- import and export Evaluation settings without including results or scores
 
 ### Routing plan workflow
 
@@ -216,6 +224,7 @@ A safe rollout looks like this:
 ### Jobs and progress
 
 - live progress tracking
+- configurable per-user parallel AI processing for Evaluation and Routing jobs
 - job logs in the UI
 - job states such as `queued`, `syncing_assets`, `preparing_image`, `classifying_ai`, `writing_results`, and `completed`
 - pause, resume, and cancel support
