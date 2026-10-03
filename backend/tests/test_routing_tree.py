@@ -1,8 +1,13 @@
 """Routing tree CRUD and hierarchy tests."""
 import pytest
 from app.services.routing_tree import RoutingTreeService, RoutingTreeError
-from app.schemas.bucket import RoutingNodeCreate, RoutingNodeUpdate
+from app.schemas.bucket import (
+    RoutingNodeCreate,
+    RoutingNodeUpdate,
+    RoutingTreeTransfer,
+)
 from app.models.bucket import Bucket
+from app.models.routing_example import RoutingExample
 from tests.conftest import TEST_USER_ID
 
 
@@ -152,3 +157,83 @@ def test_invalid_privacy_rule(db):
         svc.create_node(
             RoutingNodeCreate(name="X", privacy_rules={"faces_visible": "weird"})
         )
+
+
+def test_tree_settings_round_trip_replaces_tree_and_excludes_examples(db):
+    _seed_clean_tree(db)
+    svc = RoutingTreeService(db, TEST_USER_ID)
+    root = svc.create_node(RoutingNodeCreate(
+        name="Documents",
+        description="Readable information",
+        priority=5,
+        enabled=False,
+        positive_criteria=["paper", "email"],
+        negative_criteria=["recipe"],
+        custom_prompt_enabled=True,
+        custom_prompt="Use document tags.",
+    ))
+    child = svc.create_node(RoutingNodeCreate(
+        name="Tax",
+        parent_id=root.id,
+        destination_type="immich_album",
+        immich_album_name="Taxes",
+        auto_apply_enabled=True,
+        auto_apply_threshold=0.97,
+        privacy_rules={"documents_visible": "allow"},
+    ))
+    db.add(RoutingExample(
+        id="tree-export-example",
+        user_id=TEST_USER_ID,
+        bucket_id=child.id,
+        example_type="positive",
+        source="manual",
+        note="Do not export me",
+    ))
+    db.commit()
+
+    exported = svc.export_settings()
+    assert exported.version == 1
+    assert exported.nodes[0].name == "Documents"
+    assert exported.nodes[0].children[0].name == "Tax"
+    assert "id" not in exported.model_dump()["nodes"][0]
+    assert "parent_id" not in exported.model_dump()["nodes"][0]
+    assert "examples" not in exported.model_dump()["nodes"][0]
+
+    svc.create_node(RoutingNodeCreate(name="Temporary"))
+    imported = svc.replace_settings(exported)
+
+    assert [node["name"] for node in imported] == ["Documents"]
+    restored_root = imported[0]
+    assert restored_root["description"] == "Readable information"
+    assert restored_root["priority"] == 5
+    assert restored_root["enabled"] is False
+    assert restored_root["positive_criteria"] == ["paper", "email"]
+    assert restored_root["negative_criteria"] == ["recipe"]
+    assert restored_root["custom_prompt"] == "Use document tags."
+    restored_child = restored_root["children"][0]
+    assert restored_child["path"] == "Documents/Tax"
+    assert restored_child["destination_type"] == "immich_album"
+    assert restored_child["immich_album_name"] == "Taxes"
+    assert restored_child["auto_apply_threshold"] == 0.97
+    assert restored_child["privacy_rules"] == {"documents_visible": "allow"}
+    assert db.query(RoutingExample).filter(
+        RoutingExample.user_id == TEST_USER_ID,
+    ).count() == 0
+
+
+def test_invalid_tree_import_preserves_existing_tree(db):
+    _seed_clean_tree(db)
+    svc = RoutingTreeService(db, TEST_USER_ID)
+    svc.create_node(RoutingNodeCreate(name="Existing"))
+    invalid = RoutingTreeTransfer.model_validate({
+        "version": 1,
+        "nodes": [
+            {"name": "Duplicate"},
+            {"name": "Duplicate"},
+        ],
+    })
+
+    with pytest.raises(RoutingTreeError, match="Duplicate routing path"):
+        svc.replace_settings(invalid)
+
+    assert [node.name for node in svc.list_nodes()] == ["Existing"]

@@ -5,6 +5,8 @@ Wraps the existing classification flow but routes results through the
 LeafPromptCompiler / RoutingDecisionService / RoutingPlanService stack.
 """
 from __future__ import annotations
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 import json
 import uuid
 from typing import Optional, List, Dict, Any
@@ -41,6 +43,14 @@ If an asset appears unsafe for a destination because of privacy or quality rules
 """
 
 
+@dataclass(frozen=True)
+class PreparedRoutingAsset:
+    asset_id: str
+    immich_id: str
+    prompt_run_id: str
+    messages: List[Dict[str, Any]]
+
+
 class RoutingClassificationOrchestrator:
     def __init__(
         self,
@@ -48,6 +58,7 @@ class RoutingClassificationOrchestrator:
         provider: AIProvider,
         user_id: str,
         immich_client: Optional[ImmichClient] = None,
+        processing_concurrency: int = 1,
     ):
         self.db = db
         self.provider = provider
@@ -60,6 +71,7 @@ class RoutingClassificationOrchestrator:
         self.plan_service = RoutingPlanService(db, user_id)
         self.writeback_service = RoutingWritebackService(db, user_id, self.immich)
         self.job_service = JobProgressService(db)
+        self.processing_concurrency = max(1, min(10, processing_concurrency))
 
     # ------------------------------------------------------------------
     # Job entry point
@@ -105,6 +117,34 @@ class RoutingClassificationOrchestrator:
         self.job_service.update_progress(job_id, total=total,
                                          log_line=f"Found {total} assets to process")
 
+        if self.processing_concurrency == 1:
+            stopped = self._process_assets_sequentially(
+                assets, leaves, plan, job_id, total,
+            )
+        else:
+            stopped = self._process_assets_in_parallel(
+                assets, leaves, plan, job_id, total,
+            )
+        if stopped:
+            return plan.id
+
+        plan.status = "ready"
+        self.db.commit()
+
+        # Auto-apply approved items immediately
+        self._apply_auto_apply_items(plan.id)
+
+        self.job_service.complete_job(job_id, message=f"Routed {total} assets")
+        return plan.id
+
+    def _process_assets_sequentially(
+        self,
+        assets: List[Asset],
+        leaves: List[Bucket],
+        plan: RoutingPlan,
+        job_id: str,
+        total: int,
+    ) -> bool:
         with self.job_service.defer_commits():
             for idx, asset in enumerate(assets):
                 asset_immich_id = asset.immich_id
@@ -115,10 +155,10 @@ class RoutingClassificationOrchestrator:
                         log_line=f"Job paused at asset {idx + 1}/{total}",
                     )
                     self.job_service.flush()
-                    return plan.id
+                    return True
                 if current and current.status == "cancelled":
                     self.job_service.flush()
-                    return plan.id
+                    return True
 
                 self.job_service.update_progress(
                     job_id,
@@ -139,15 +179,78 @@ class RoutingClassificationOrchestrator:
                         job_id, processed=idx + 1, error_delta=1,
                         log_line=f"\u2717 Routing error for {asset_immich_id}: {error_message}",
                     )
+        return False
 
-        plan.status = "ready"
-        self.db.commit()
+    def _process_assets_in_parallel(
+        self,
+        assets: List[Asset],
+        leaves: List[Bucket],
+        plan: RoutingPlan,
+        job_id: str,
+        total: int,
+    ) -> bool:
+        with ThreadPoolExecutor(max_workers=self.processing_concurrency) as executor:
+            for batch_start in range(0, total, self.processing_concurrency):
+                current = self.job_service.get_job(job_id)
+                if current and current.status == "paused":
+                    self.job_service.update_progress(
+                        job_id,
+                        log_line=f"Job paused at asset {batch_start + 1}/{total}",
+                    )
+                    self.job_service.flush()
+                    return True
+                if current and current.status == "cancelled":
+                    self.job_service.flush()
+                    return True
 
-        # Auto-apply approved items immediately
-        self._apply_auto_apply_items(plan.id)
+                batch = assets[
+                    batch_start:batch_start + self.processing_concurrency
+                ]
+                prepared: list[PreparedRoutingAsset] = []
+                for offset, asset in enumerate(batch):
+                    index = batch_start + offset
+                    self.job_service.update_progress(
+                        job_id,
+                        status="classifying_ai",
+                        processed=index,
+                        log_line=(
+                            f"Routing asset {index + 1}/{total}: {asset.immich_id}"
+                        ),
+                    )
+                    prepared.append(
+                        self._prepare_asset(asset, leaves, job_id)
+                    )
 
-        self.job_service.complete_job(job_id, message=f"Routed {total} assets")
-        return plan.id
+                futures = [
+                    executor.submit(self._classify_prepared_asset, request)
+                    for request in prepared
+                ]
+                for offset, (request, future) in enumerate(zip(prepared, futures)):
+                    index = batch_start + offset
+                    try:
+                        raw, ai_result = future.result()
+                        self._save_prepared_result(
+                            request, raw, ai_result, leaves, plan,
+                        )
+                        self.job_service.update_progress(
+                            job_id,
+                            processed=index + 1,
+                            success_delta=1,
+                            log_line=f"\u2713 Asset {request.immich_id} routed",
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        self.db.rollback()
+                        self._save_prepared_error(request, exc)
+                        self.job_service.update_progress(
+                            job_id,
+                            processed=index + 1,
+                            error_delta=1,
+                            log_line=(
+                                f"\u2717 Routing error for {request.immich_id}: "
+                                f"{str(exc)[:200]}"
+                            ),
+                        )
+        return False
 
     # ------------------------------------------------------------------
     # Per-asset
@@ -160,6 +263,20 @@ class RoutingClassificationOrchestrator:
         plan: RoutingPlan,
         job_id: str,
     ) -> None:
+        request = self._prepare_asset(asset, leaves, job_id)
+        try:
+            raw, ai_result = self._classify_prepared_asset(request)
+        except Exception as exc:
+            self._save_prepared_error(request, exc)
+            raise
+        self._save_prepared_result(request, raw, ai_result, leaves, plan)
+
+    def _prepare_asset(
+        self,
+        asset: Asset,
+        leaves: List[Bucket],
+        job_id: str,
+    ) -> PreparedRoutingAsset:
         asset_id = asset.id
         asset_immich_id = asset.immich_id
         messages = self.assemble_routing_messages(asset, leaves)
@@ -176,30 +293,59 @@ class RoutingClassificationOrchestrator:
             },
             status="pending",
         )
+        prompt_run_id = prompt_run.id
         self.db.add(prompt_run)
         self.db.commit()
+        return PreparedRoutingAsset(
+            asset_id=asset_id,
+            immich_id=asset_immich_id,
+            prompt_run_id=prompt_run_id,
+            messages=messages,
+        )
 
-        try:
-            image_payload = self.image_service.prepare_for_provider(asset_immich_id)
-            raw = self._call_provider(messages, image_payload)
-            ai_result = AIRoutingResult.model_validate(raw)
-            prompt_run.raw_response = json.dumps(raw)
-            prompt_run.parsed_response_json = ai_result.model_dump()
-            prompt_run.status = "success"
-        except Exception as e:
-            prompt_run.status = "failed"
-            prompt_run.error_message = str(e)
-            self.db.commit()
-            raise
+    def _classify_prepared_asset(
+        self,
+        request: PreparedRoutingAsset,
+    ) -> tuple[Dict[str, Any], AIRoutingResult]:
+        image_payload = self.image_service.prepare_for_provider(request.immich_id)
+        raw = self._call_provider(request.messages, image_payload)
+        return raw, AIRoutingResult.model_validate(raw)
 
+    def _save_prepared_result(
+        self,
+        request: PreparedRoutingAsset,
+        raw: Dict[str, Any],
+        ai_result: AIRoutingResult,
+        leaves: List[Bucket],
+        plan: RoutingPlan,
+    ) -> None:
+        prompt_run = self.db.query(PromptRun).filter(
+            PromptRun.id == request.prompt_run_id,
+        ).one()
+        prompt_run.raw_response = json.dumps(raw)
+        prompt_run.parsed_response_json = ai_result.model_dump()
+        prompt_run.status = "success"
         decision = self.decision_service.resolve_routing(ai_result, leaves)
         self.plan_service.add_item(
             plan,
-            asset_id=asset_id,
+            asset_id=request.asset_id,
             decision=decision,
             ai_metadata=ai_result.metadata.model_dump(),
             raw_ai_response=ai_result.model_dump(),
         )
+
+    def _save_prepared_error(
+        self,
+        request: PreparedRoutingAsset,
+        exc: Exception,
+    ) -> None:
+        prompt_run = self.db.query(PromptRun).filter(
+            PromptRun.id == request.prompt_run_id,
+        ).one_or_none()
+        if prompt_run:
+            prompt_run.status = "failed"
+            prompt_run.error_message = str(exc)
+            self.db.commit()
 
     # ------------------------------------------------------------------
     # Prompt assembly

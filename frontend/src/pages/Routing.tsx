@@ -11,6 +11,7 @@ import {
 import type { RoutingNode } from "../types";
 import RoutingLeafEditor from "../components/RoutingLeafEditor";
 import RoutingEvaluationPanel from "../components/RoutingEvaluationPanel";
+import RoutingTreeTransferMenu from "../components/RoutingTreeTransferMenu";
 import RunRoutingButton from "../components/RunRoutingButton";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import masterDetail from "../styles/MasterDetail.module.css";
@@ -178,6 +179,7 @@ export default function Routing() {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [transferError, setTransferError] = useState<string | null>(null);
 
   const flat = useMemo(() => flatten(tree), [tree]);
   const selected = flat.find((n) => n.id === selectedId) ?? null;
@@ -285,6 +287,15 @@ export default function Routing() {
           >
             <Plus size={13} /> Add Root
           </button>
+          <RoutingTreeTransferMenu
+            onImported={() => {
+              setSelectedId(null);
+              setExpanded(new Set());
+              setTransferError(null);
+              void qc.invalidateQueries({ queryKey: ["routing-tree"] });
+            }}
+            onError={setTransferError}
+          />
           <RunRoutingButton
             label="Run Routing"
             pending={classifyMut.isPending}
@@ -293,6 +304,20 @@ export default function Routing() {
           />
         </div>
       </div>
+
+      {transferError && (
+        <div style={{
+          marginBottom: 14,
+          padding: "8px 10px",
+          border: "1px solid rgba(239,68,68,0.35)",
+          borderRadius: 7,
+          background: "rgba(127,29,29,0.18)",
+          color: "#fca5a5",
+          fontSize: 12,
+        }}>
+          {transferError}
+        </div>
+      )}
 
       <div className={masterDetail.layout}>
         <div className={[masterDetail.master, masterDetail.flushMaster, selected ? masterDetail.masterHidden : ""].join(" ")} style={{

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
 
@@ -96,6 +96,23 @@ class RoutingNodeUpdate(BaseModel):
     quality_rules: Optional[Dict[str, Any]] = None
     automation_rules: Optional[Dict[str, Any]] = None
     metadata_rules: Optional[Dict[str, Any]] = None
+
+
+class RoutingTreeTransferNode(RoutingNodeCreate):
+    parent_id: None = Field(default=None, exclude=True)
+    children: List["RoutingTreeTransferNode"] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RoutingTreeTransfer(BaseModel):
+    version: Literal[1] = 1
+    nodes: List[RoutingTreeTransferNode] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+RoutingTreeTransferNode.model_rebuild()
 
 
 class RoutingNodeOut(BaseModel):

@@ -242,6 +242,79 @@
   background: #2563eb;
 }
 
+.evaluateGroup {
+  position: relative;
+  display: inline-flex;
+}
+
+.evaluateMain {
+  border-radius: 7px 0 0 7px;
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.evaluateToggle {
+  padding-right: 9px;
+  padding-left: 9px;
+  border-radius: 0 7px 7px 0;
+}
+
+.evaluationMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 280px;
+  padding: 6px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+.menuItem {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #e2e8f0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.menuItem:hover {
+  background: #1e293b;
+}
+
+.menuItem svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.menuItem span,
+.menuItem strong,
+.menuItem small {
+  display: block;
+}
+
+.menuItem strong {
+  font-size: 12px;
+}
+
+.menuItem small {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.fileInput {
+  display: none;
+}
+
 @media (max-width: 760px) {
   .header {
     flex-direction: column;
@@ -262,5 +335,11 @@
 
   .actions {
     flex-wrap: wrap;
+  }
+
+  .evaluationMenu {
+    right: auto;
+    left: 0;
+    width: min(280px, calc(100vw - 40px));
   }
 }

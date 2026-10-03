@@ -12,6 +12,7 @@ from ..services.immich_client import ImmichClient
 from ..services.routing_classification import RoutingClassificationOrchestrator
 from ..services.provider_resolver import resolve_user_provider
 from ..services.secret_store import decrypt_secret
+from ..services.user_preferences import get_processing_concurrency
 
 
 def _immich_client_context(client):
@@ -145,7 +146,11 @@ def run_routing_classification(
 
         with _immich_client_context(_get_user_immich_client(db, user_id)) as immich:
             orch = RoutingClassificationOrchestrator(
-                db, provider, user_id=user_id, immich_client=immich,
+                db,
+                provider,
+                user_id=user_id,
+                immich_client=immich,
+                processing_concurrency=get_processing_concurrency(db, user_id),
             )
             orch.run_classification_job(
                 job_id, asset_ids=asset_ids, limit=limit, force=force, plan_id=plan_id,

@@ -136,6 +136,18 @@ export interface RoutingNode {
   updated_at?: string;
 }
 
+export type RoutingTreeTransferNode = Omit<
+  RoutingNode,
+  "id" | "parent_id" | "path" | "is_leaf" | "children" | "created_at" | "updated_at"
+> & {
+  children: RoutingTreeTransferNode[];
+};
+
+export interface RoutingTreeSettings {
+  version: 1;
+  nodes: RoutingTreeTransferNode[];
+}
+
 export interface RoutingExample {
   id: string;
   bucket_id: string;

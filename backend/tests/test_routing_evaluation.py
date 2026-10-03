@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.asset import Asset
+from app.models.routing_evaluation import RoutingEvaluation, RoutingEvaluationItem
 from app.schemas.routing_evaluation import (
     RoutingEvaluationItemInput,
     TRASH_DESTINATION,
@@ -130,6 +131,35 @@ def test_evaluate_scores_tag_and_destination_and_persists_latest(db):
     assert result.items[0].score == 1
     assert result.items[0].max_score == 1
     assert service.get_state().total_score == 1
+
+
+def test_get_state_repairs_stale_aggregate_score(db):
+    _add_asset(db)
+    service = RoutingEvaluationService(db, TEST_USER_ID)
+    saved = service.save_items([
+        RoutingEvaluationItemInput(
+            immich_id="immich-eval-1",
+            expected_tag="tax",
+        ),
+    ])
+    item = db.query(RoutingEvaluationItem).filter(
+        RoutingEvaluationItem.id == saved.items[0].id,
+    ).one()
+    item.score = 1
+    item.max_score = 1
+    evaluation = db.query(RoutingEvaluation).filter(
+        RoutingEvaluation.user_id == TEST_USER_ID,
+    ).one()
+    evaluation.total_score = 0
+    evaluation.max_score = 1
+    db.commit()
+
+    state = service.get_state()
+
+    assert state.total_score == 1
+    assert db.query(RoutingEvaluation).filter(
+        RoutingEvaluation.user_id == TEST_USER_ID,
+    ).one().total_score == 1
 
 
 def test_evaluate_splits_item_score_across_configured_checks(db):

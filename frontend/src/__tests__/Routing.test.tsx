@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   saveEvaluationMock: vi.fn(),
   runEvaluationMock: vi.fn(),
   runEvaluationItemMock: vi.fn(),
+  routingPreferencesMock: vi.fn(),
+  exportTreeSettingsMock: vi.fn(),
+  importTreeSettingsMock: vi.fn(),
   plansMock: vi.fn(),
   planSummaryMock: vi.fn(),
   planItemsMock: vi.fn(),
@@ -32,6 +35,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../services/api", () => ({
   getRoutingTree: mocks.treeMock,
+  exportRoutingTreeSettings: mocks.exportTreeSettingsMock,
+  importRoutingTreeSettings: mocks.importTreeSettingsMock,
   createRoutingNode: mocks.createMock,
   updateRoutingNode: mocks.updateMock,
   deleteRoutingNode: mocks.deleteMock,
@@ -44,6 +49,7 @@ vi.mock("../services/api", () => ({
   getRoutingPromptPreview: mocks.promptPreviewMock,
   startRoutingClassify: mocks.classifyMock,
   getRoutingEvaluation: mocks.evaluationMock,
+  getRoutingPreferences: mocks.routingPreferencesMock,
   saveRoutingEvaluation: mocks.saveEvaluationMock,
   startRoutingEvaluation: mocks.runEvaluationMock,
   runRoutingEvaluationItem: mocks.runEvaluationItemMock,
@@ -68,6 +74,8 @@ const {
   treeMock, createMock, examplesMock, promptPreviewMock,
   classifyMock, plansMock, planSummaryMock, planItemsMock, updateItemMock,
   evaluationMock, saveEvaluationMock, runEvaluationMock, runEvaluationItemMock,
+  routingPreferencesMock,
+  exportTreeSettingsMock, importTreeSettingsMock,
   nodesMock, approveMock, rejectMock, applyMock,
   assetMock,
 } = mocks;
@@ -118,6 +126,15 @@ beforeEach(() => {
   saveEvaluationMock.mockReset();
   runEvaluationMock.mockReset();
   runEvaluationItemMock.mockReset();
+  routingPreferencesMock.mockReset();
+  exportTreeSettingsMock.mockReset();
+  importTreeSettingsMock.mockReset();
+  routingPreferencesMock.mockResolvedValue({
+    learn_from_corrections: false,
+    processing_concurrency: 1,
+  });
+  exportTreeSettingsMock.mockResolvedValue({ version: 1, nodes: [] });
+  importTreeSettingsMock.mockResolvedValue({ nodes: [] });
   classifyMock.mockResolvedValue({ job_id: "job-1", plan_id: "plan-1", status: "queued" });
   evaluationMock.mockResolvedValue({
     items: [],
@@ -180,9 +197,109 @@ beforeEach(() => {
     },
   });
   vi.stubGlobal("alert", vi.fn());
+  vi.stubGlobal("confirm", vi.fn(() => true));
 });
 
 describe("Routing tree page", () => {
+  it("confirms and replaces all Routing Tree settings when importing", async () => {
+    const oldNode = {
+      id: "old", parent_id: null, name: "Old Root", path: "Old Root",
+      is_leaf: true, enabled: true, priority: 100,
+      destination_type: "virtual", create_album_if_missing: true,
+      auto_apply_enabled: false, auto_apply_threshold: 0.95,
+      review_below_threshold: 0.85, exclusive: false, allow_secondary: true,
+      minimum_quality: "any", allow_blurry: true, allow_dark: true,
+      allow_screenshot: true, allow_duplicate: true,
+      suggest_description: true, suggest_tags: true, suggest_location: false,
+      suggest_caption: false, write_description: true, write_tags: true,
+      write_location: false, custom_prompt_enabled: false,
+      positive_criteria: [], negative_criteria: [], privacy_rules: {},
+      quality_rules: {}, automation_rules: {}, metadata_rules: {}, children: [],
+    };
+    const newNode = { ...oldNode, id: "new", name: "Imported Root", path: "Imported Root" };
+    treeMock
+      .mockResolvedValueOnce({ nodes: [oldNode] })
+      .mockResolvedValue({ nodes: [newNode] });
+    const imported = {
+      version: 1 as const,
+      nodes: [{
+        name: "Imported Root",
+        enabled: true,
+        priority: 3,
+        children: [{
+          name: "Imported Leaf",
+          enabled: true,
+          priority: 4,
+          children: [],
+        }],
+      }],
+    };
+    importTreeSettingsMock.mockResolvedValue({ nodes: [newNode] });
+    render(<Wrapper><Routing /></Wrapper>);
+
+    fireEvent.click(await screen.findByLabelText("Routing Tree settings options"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import settings/i }));
+    const file = new File(
+      [JSON.stringify(imported)],
+      "routing-tree.json",
+      { type: "application/json" },
+    );
+    fireEvent.change(screen.getByLabelText("Import Routing Tree settings file"), {
+      target: { files: [file] },
+    });
+
+    expect(confirm).toHaveBeenCalledWith(
+      "Import will override the current Routing Tree settings. Continue?",
+    );
+    await waitFor(() => {
+      expect(importTreeSettingsMock).toHaveBeenCalledWith(imported);
+    });
+    expect((await screen.findAllByText("Imported Root")).length).toBeGreaterThan(0);
+  });
+
+  it("exports complete Routing Tree settings returned by the backend", async () => {
+    treeMock.mockResolvedValue({ nodes: [] });
+    const exportedSettings = {
+      version: 1 as const,
+      nodes: [{
+        name: "Documents",
+        description: "Readable content",
+        enabled: true,
+        priority: 5,
+        destination_type: "virtual",
+        children: [{ name: "Tax", enabled: true, priority: 4, children: [] }],
+      }],
+    };
+    exportTreeSettingsMock.mockResolvedValue(exportedSettings);
+    const exportedBlobs: Blob[] = [];
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn((blob: Blob) => {
+        exportedBlobs.push(blob);
+        return "blob:routing-tree";
+      }),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(<Wrapper><Routing /></Wrapper>);
+
+    fireEvent.click(await screen.findByLabelText("Routing Tree settings options"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Export settings/i }));
+
+    await waitFor(() => expect(exportTreeSettingsMock).toHaveBeenCalled());
+    const text = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(exportedBlobs[0]);
+    });
+    expect(JSON.parse(text)).toEqual(exportedSettings);
+    click.mockRestore();
+  });
+
   it("adds and saves evaluation items only after required input is valid", async () => {
     treeMock.mockResolvedValue({ nodes: [] });
     render(<Wrapper><Routing /></Wrapper>);
@@ -243,6 +360,146 @@ describe("Routing tree page", () => {
     expect(imageIds[1]).toHaveValue("existing-image");
   });
 
+  it("confirms and replaces Evaluation settings when importing", async () => {
+    treeMock.mockResolvedValue({ nodes: [] });
+    evaluationMock.mockResolvedValue({
+      items: [{
+        id: "existing",
+        immich_id: "existing-image",
+        expected_tag: "old",
+        expected_absent_tag: null,
+        expected_destination: null,
+        result_tags: ["old"],
+        score: 1,
+        max_score: 1,
+      }],
+      total_score: 1,
+      max_score: 1,
+      evaluated_at: "2026-10-03T00:00:00Z",
+    });
+    saveEvaluationMock.mockResolvedValue({
+      items: [{
+        id: "imported",
+        immich_id: "imported-image",
+        expected_tag: "document,email",
+        expected_absent_tag: "personal",
+        expected_destination: "Documents",
+        result_tags: [],
+      }],
+      total_score: null,
+      max_score: null,
+      evaluated_at: null,
+    });
+    render(<Wrapper><Routing /></Wrapper>);
+
+    fireEvent.click(await screen.findByLabelText("Evaluation settings options"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import settings/i }));
+    const file = new File([
+      JSON.stringify({
+        version: 1,
+        items: [{
+          immich_id: "imported-image",
+          expected_tag: "document, email",
+          expected_absent_tag: "personal",
+          expected_destination: "Documents",
+          score: 99,
+          result_tags: ["ignored"],
+        }],
+      }),
+    ], "evaluation.json", { type: "application/json" });
+    fireEvent.change(screen.getByLabelText("Import Evaluation settings file"), {
+      target: { files: [file] },
+    });
+
+    expect(confirm).toHaveBeenCalledWith(
+      "Import will override the current Evaluation settings. Continue?",
+    );
+    await waitFor(() => {
+      expect(saveEvaluationMock).toHaveBeenCalledWith([{
+        immich_id: "imported-image",
+        expected_tag: "document,email",
+        expected_absent_tag: "personal",
+        expected_destination: "Documents",
+      }]);
+    });
+    expect(await screen.findByDisplayValue("imported-image")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("existing-image")).not.toBeInTheDocument();
+  });
+
+  it("keeps Evaluation settings when import confirmation is cancelled", async () => {
+    vi.mocked(confirm).mockReturnValueOnce(false);
+    treeMock.mockResolvedValue({ nodes: [] });
+    render(<Wrapper><Routing /></Wrapper>);
+
+    const file = new File([
+      JSON.stringify({ version: 1, items: [] }),
+    ], "evaluation.json", { type: "application/json" });
+    fireEvent.change(
+      await screen.findByLabelText("Import Evaluation settings file"),
+      { target: { files: [file] } },
+    );
+
+    expect(saveEvaluationMock).not.toHaveBeenCalled();
+  });
+
+  it("exports Evaluation configuration without IDs, results, or scores", async () => {
+    treeMock.mockResolvedValue({ nodes: [] });
+    evaluationMock.mockResolvedValue({
+      items: [{
+        id: "private-database-id",
+        immich_id: "export-image",
+        expected_tag: "document,email",
+        expected_absent_tag: "personal",
+        expected_destination: "Documents",
+        result_description: "Existing result",
+        result_tags: ["document", "email"],
+        score: 1,
+        max_score: 1,
+      }],
+      total_score: 1,
+      max_score: 1,
+      evaluated_at: "2026-10-03T00:00:00Z",
+    });
+    const exportedBlobs: Blob[] = [];
+    const createObjectURL = vi.fn((blob: Blob) => {
+      exportedBlobs.push(blob);
+      return "blob:evaluation";
+    });
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(<Wrapper><Routing /></Wrapper>);
+
+    fireEvent.click(await screen.findByLabelText("Evaluation settings options"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Export settings/i }));
+
+    const blob = exportedBlobs[0];
+    const exported = JSON.parse(await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    }));
+    expect(exported).toEqual({
+      version: 1,
+      items: [{
+        immich_id: "export-image",
+        expected_tag: "document,email",
+        expected_absent_tag: "personal",
+        expected_destination: "Documents",
+      }],
+    });
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:evaluation");
+    click.mockRestore();
+  });
+
   it("shows per-item evaluation progress and renders each completed result", async () => {
     const item = (id: string, immichId: string) => ({
       id,
@@ -260,14 +517,37 @@ describe("Routing tree page", () => {
       error_message: null,
       evaluated_at: null,
     });
+
     const first = item("eval-1", "image-1");
     const second = item("eval-2", "image-2");
     treeMock.mockResolvedValue({ nodes: [] });
-    evaluationMock.mockResolvedValue({
+    evaluationMock.mockResolvedValueOnce({
       items: [first, second],
       total_score: null,
       max_score: null,
       evaluated_at: null,
+    }).mockResolvedValue({
+      items: [
+        {
+          ...first,
+          result_description: "A boy walking a dog.",
+          result_tags: ["dog"],
+          tag_matched: true,
+          score: 1,
+          max_score: 1,
+        },
+        {
+          ...second,
+          result_description: "Another dog.",
+          result_tags: ["dog"],
+          tag_matched: true,
+          score: 1,
+          max_score: 1,
+        },
+      ],
+      total_score: 2,
+      max_score: 2,
+      evaluated_at: "2026-10-02T00:00:01Z",
     });
     runEvaluationMock.mockResolvedValue({
       items: [first, second],
@@ -340,6 +620,77 @@ describe("Routing tree page", () => {
 
     expect(await screen.findByRole("button", { name: "Evaluate Routing" })).toBeEnabled();
     expect(screen.getByText("Latest total: 2 / 2")).toBeInTheDocument();
+  });
+
+  it("evaluates items up to the configured parallel limit", async () => {
+    const item = (id: string) => ({
+      id,
+      immich_id: `image-${id}`,
+      expected_tag: null,
+      expected_absent_tag: null,
+      expected_destination: null,
+      result_tags: [],
+    });
+    const items = [item("1"), item("2"), item("3")];
+    treeMock.mockResolvedValue({ nodes: [] });
+    evaluationMock.mockResolvedValue({
+      items,
+      total_score: null,
+      max_score: null,
+      evaluated_at: null,
+    });
+    routingPreferencesMock.mockResolvedValue({
+      learn_from_corrections: false,
+      processing_concurrency: 2,
+    });
+    runEvaluationMock.mockResolvedValue({
+      items,
+      total_score: 0,
+      max_score: 0,
+      evaluated_at: null,
+    });
+    const first = deferred<ReturnType<typeof evaluationMock>>();
+    const second = deferred<ReturnType<typeof evaluationMock>>();
+    const third = deferred<ReturnType<typeof evaluationMock>>();
+    runEvaluationItemMock
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+      .mockImplementationOnce(() => third.promise);
+
+    render(<Wrapper><Routing /></Wrapper>);
+    fireEvent.click(await screen.findByRole("button", { name: "Evaluate Routing" }));
+
+    await waitFor(() => expect(runEvaluationItemMock).toHaveBeenCalledTimes(2));
+    expect(runEvaluationItemMock).toHaveBeenNthCalledWith(1, "1");
+    expect(runEvaluationItemMock).toHaveBeenNthCalledWith(2, "2");
+    expect(screen.getByLabelText("Evaluating item 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Evaluating item 2")).toBeInTheDocument();
+
+    await act(async () => {
+      first.resolve({
+        items,
+        total_score: 0,
+        max_score: 0,
+        evaluated_at: "2026-10-03T00:00:00Z",
+      });
+    });
+    await waitFor(() => expect(runEvaluationItemMock).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      second.resolve({
+        items,
+        total_score: 0,
+        max_score: 0,
+        evaluated_at: "2026-10-03T00:00:00Z",
+      });
+      third.resolve({
+        items,
+        total_score: 0,
+        max_score: 0,
+        evaluated_at: "2026-10-03T00:00:00Z",
+      });
+    });
+    expect(await screen.findByRole("button", { name: "Evaluate Routing" })).toBeEnabled();
   });
 
   it("renders nested nodes", async () => {

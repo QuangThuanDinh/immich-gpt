@@ -531,15 +531,20 @@ function RoutingPreferencesSection() {
   });
 
   const [learn, setLearn] = React.useState<boolean | undefined>(undefined);
+  const [concurrency, setConcurrency] = React.useState<number | undefined>(undefined);
   const [saved, setSaved] = React.useState(false);
 
   React.useEffect(() => {
-    if (prefs) setLearn(prefs.learn_from_corrections);
+    if (prefs) {
+      setLearn(prefs.learn_from_corrections);
+      setConcurrency(prefs.processing_concurrency);
+    }
   }, [prefs]);
 
   const saveMut = useMutation({
     mutationFn: () => saveRoutingPreferences({
       learn_from_corrections: learn ?? false,
+      processing_concurrency: concurrency ?? 1,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["routing-preferences"] });
@@ -549,6 +554,7 @@ function RoutingPreferencesSection() {
   });
 
   const effectiveLearn = learn ?? prefs?.learn_from_corrections ?? false;
+  const effectiveConcurrency = concurrency ?? prefs?.processing_concurrency ?? 1;
 
   return (
     <Section title="Routing Preferences">
@@ -578,9 +584,36 @@ function RoutingPreferencesSection() {
         </label>
 
         <div>
+          <label
+            htmlFor="processing-concurrency"
+            style={{ fontSize: 13, color: "#f1f5f9", fontWeight: 500, display: "block", marginBottom: 4 }}
+          >
+            Parallel AI processes
+          </label>
+          <input
+            id="processing-concurrency"
+            type="number"
+            min={1}
+            max={10}
+            value={effectiveConcurrency}
+            onChange={(e) => setConcurrency(Number(e.target.value))}
+            style={{ ...inputStyle, width: 120 }}
+          />
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+            Run 1–10 Evaluation or Routing AI requests at once. Higher values may trigger provider rate limits.
+          </div>
+        </div>
+
+        <div>
           <button
             onClick={() => saveMut.mutate()}
-            disabled={saveMut.isPending || learn === undefined}
+            disabled={
+              saveMut.isPending
+              || learn === undefined
+              || concurrency === undefined
+              || concurrency < 1
+              || concurrency > 10
+            }
             style={{
               padding: "8px 20px", borderRadius: 8, border: "none",
               background: saved ? "#16a34a" : "#1e40af",

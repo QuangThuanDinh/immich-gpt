@@ -15,6 +15,7 @@ import type {
   RoutingPlanSummary,
   RoutingEvaluation,
   RoutingEvaluationItemInput,
+  RoutingTreeSettings,
 } from "../types";
 
 const api = axios.create({
@@ -106,6 +107,7 @@ export const saveImmichSettings = (url: string, apiKey: string): Promise<ImmichS
 
 export interface RoutingPreferences {
   learn_from_corrections: boolean;
+  processing_concurrency: number;
 }
 export const getRoutingPreferences = (): Promise<RoutingPreferences> =>
   api.get("/settings/routing").then((r) => r.data);
@@ -219,6 +221,14 @@ export const getAuditLogCount = (params?: {
 // --- Routing tree ---
 export const getRoutingTree = (): Promise<{ nodes: RoutingNode[] }> =>
   api.get("/routing/tree").then((r) => r.data);
+
+export const exportRoutingTreeSettings = (): Promise<RoutingTreeSettings> =>
+  api.get("/routing/tree/settings").then((r) => r.data);
+
+export const importRoutingTreeSettings = (
+  settings: RoutingTreeSettings,
+): Promise<{ nodes: RoutingNode[] }> =>
+  api.put("/routing/tree/settings", settings).then((r) => r.data);
 
 export const listRoutingNodes = (): Promise<RoutingNode[]> =>
   api.get("/routing/nodes").then((r) => r.data);

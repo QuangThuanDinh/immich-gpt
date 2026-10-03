@@ -408,11 +408,31 @@ def test_list_openrouter_models_uses_custom_base_url(client, db, monkeypatch):
 def test_routing_preferences_default_off(client):
     r = client.get("/api/settings/routing")
     assert r.status_code == 200
-    assert r.json() == {"learn_from_corrections": False}
+    assert r.json() == {
+        "learn_from_corrections": False,
+        "processing_concurrency": 1,
+    }
 
 
 def test_save_routing_preferences(client):
-    r = client.post("/api/settings/routing", json={"learn_from_corrections": True})
+    r = client.post("/api/settings/routing", json={
+        "learn_from_corrections": True,
+        "processing_concurrency": 4,
+    })
     assert r.status_code == 200
-    assert r.json() == {"learn_from_corrections": True}
-    assert client.get("/api/settings/routing").json() == {"learn_from_corrections": True}
+    assert r.json() == {
+        "learn_from_corrections": True,
+        "processing_concurrency": 4,
+    }
+    assert client.get("/api/settings/routing").json() == {
+        "learn_from_corrections": True,
+        "processing_concurrency": 4,
+    }
+
+
+def test_routing_preferences_reject_invalid_concurrency(client):
+    response = client.post("/api/settings/routing", json={
+        "learn_from_corrections": False,
+        "processing_concurrency": 11,
+    })
+    assert response.status_code == 422

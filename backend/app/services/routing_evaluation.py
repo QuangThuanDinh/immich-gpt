@@ -41,6 +41,19 @@ class RoutingEvaluationService:
     def get_state(self) -> RoutingEvaluationOut:
         evaluation = self._get_or_create_evaluation()
         items = self._list_items(evaluation.id)
+        if evaluation.total_score is not None:
+            total_score = round(sum(item.score or 0 for item in items), 4)
+            max_score = sum(
+                1.0 if self._configured_check_count(item) else 0.0
+                for item in items
+            )
+            if (
+                evaluation.total_score != total_score
+                or evaluation.max_score != max_score
+            ):
+                evaluation.total_score = total_score
+                evaluation.max_score = max_score
+                self.db.commit()
         return self._serialize_state(evaluation, items)
 
     def save_items(

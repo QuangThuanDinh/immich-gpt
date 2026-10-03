@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import Settings from "../pages/Settings";
@@ -13,12 +13,19 @@ vi.mock("../services/api", () => ({
   deleteProvider: vi.fn(),
   testProvider: vi.fn(),
   getProviderModels: vi.fn().mockResolvedValue([]),
-  getRoutingPreferences: vi.fn().mockResolvedValue({ learn_from_corrections: false }),
+  getRoutingPreferences: vi.fn().mockResolvedValue({
+    learn_from_corrections: false,
+    processing_concurrency: 1,
+  }),
   saveRoutingPreferences: vi.fn(),
   getHealth: vi.fn().mockResolvedValue({ status: "ok" }),
 }));
 
-import { getImmichSettings } from "../services/api";
+import {
+  getImmichSettings,
+  getRoutingPreferences,
+  saveRoutingPreferences,
+} from "../services/api";
 
 function renderPage() {
   const client = new QueryClient({
@@ -46,6 +53,28 @@ describe("Settings page", () => {
 
     const input = await screen.findByDisplayValue("http://immich.example");
     expect(input).toBeInTheDocument();
+  });
+
+  it("saves per-user parallel processing concurrency", async () => {
+    vi.mocked(saveRoutingPreferences).mockResolvedValue({
+      learn_from_corrections: false,
+      processing_concurrency: 4,
+    });
+    renderPage();
+
+    const input = await screen.findByLabelText("Parallel AI processes");
+    const saveButton = screen.getByRole("button", { name: "Save Preferences" });
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    fireEvent.change(input, { target: { value: "4" } });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(getRoutingPreferences).toHaveBeenCalled();
+      expect(saveRoutingPreferences).toHaveBeenCalledWith({
+        learn_from_corrections: false,
+        processing_concurrency: 4,
+      });
+    });
   });
 
   it("allows an optional OpenRouter base URL", async () => {

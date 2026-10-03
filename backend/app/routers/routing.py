@@ -20,6 +20,7 @@ from ..schemas.bucket import (
     RoutingExampleCreate, RoutingExampleOut,
     RoutingPlanOut, RoutingPlanItemOut,
     RoutingClassifyRequest,
+    RoutingTreeTransfer,
     PlanItemMoveRequest, PlanItemActionRequest, PlanItemUpdateRequest,
     PromptPreviewOut,
 )
@@ -102,6 +103,27 @@ def get_tree(
 ):
     svc = RoutingTreeService(db, current_user.id)
     return {"nodes": svc.build_tree()}
+
+
+@router.get("/tree/settings", response_model=RoutingTreeTransfer)
+def export_tree_settings(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    return RoutingTreeService(db, current_user.id).export_settings()
+
+
+@router.put("/tree/settings")
+def import_tree_settings(
+    body: RoutingTreeTransfer,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    svc = RoutingTreeService(db, current_user.id)
+    try:
+        return {"nodes": svc.replace_settings(body)}
+    except RoutingTreeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/nodes", response_model=List[RoutingNodeOut])

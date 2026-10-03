@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
+from pydantic import Field
 
 from ..database import get_db
 from ..dependencies import require_active_user
@@ -20,6 +21,11 @@ from ..services.secret_store import (
     is_encrypted_secret,
 )
 from ..services.url_validation import ServiceUrlError, validate_service_url
+from ..services.user_preferences import (
+    DEFAULT_PROCESSING_CONCURRENCY,
+    PROCESSING_CONCURRENCY_KEY,
+    get_processing_concurrency,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -317,6 +323,11 @@ def list_provider_models(
 
 class RoutingPreferences(BaseModel):
     learn_from_corrections: bool = False
+    processing_concurrency: int = Field(
+        default=DEFAULT_PROCESSING_CONCURRENCY,
+        ge=1,
+        le=10,
+    )
 
 
 @router.get("/routing", response_model=RoutingPreferences)
@@ -326,7 +337,10 @@ def get_routing_preferences(
 ):
     val = _get_setting(db, current_user.id, _KEY_LEARN_FROM_CORRECTIONS)
     learn = False if val is None else val.lower() not in ("false", "0", "no")
-    return RoutingPreferences(learn_from_corrections=learn)
+    return RoutingPreferences(
+        learn_from_corrections=learn,
+        processing_concurrency=get_processing_concurrency(db, current_user.id),
+    )
 
 
 @router.post("/routing", response_model=RoutingPreferences)
@@ -338,6 +352,12 @@ def save_routing_preferences(
     _set_setting(
         db, current_user.id, _KEY_LEARN_FROM_CORRECTIONS,
         "true" if body.learn_from_corrections else "false",
+    )
+    _set_setting(
+        db,
+        current_user.id,
+        PROCESSING_CONCURRENCY_KEY,
+        str(body.processing_concurrency),
     )
     return body
 

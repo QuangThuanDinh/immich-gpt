@@ -1,6 +1,8 @@
 """RoutingPlanService and routing API tests."""
 import uuid
 import pytest
+import threading
+import time
 from contextlib import nullcontext
 from datetime import datetime
 from types import SimpleNamespace
@@ -13,7 +15,10 @@ from app.models.routing_plan import RoutingPlan, RoutingPlanItem
 from app.services.secret_store import encrypt_secret
 from app.services.routing_plan_service import RoutingPlanService
 from app.services.routing_tree import RoutingTreeService
-from app.services.routing_classification import RoutingClassificationOrchestrator
+from app.services.routing_classification import (
+    PreparedRoutingAsset,
+    RoutingClassificationOrchestrator,
+)
 from app.services.routing_writeback import RoutingWritebackService
 from app.services.routing_schemas import (
     RoutingDecision, Candidate,
@@ -466,6 +471,58 @@ def test_classification_rolls_back_before_logging_asset_failure(db):
     assert orchestrator.run_classification_job("job-id") == "plan-id"
     db.rollback.assert_called_once()
     orchestrator.job_service.complete_job.assert_called_once()
+
+
+def test_parallel_classification_respects_configured_concurrency(db):
+    orchestrator = RoutingClassificationOrchestrator(
+        db,
+        _FakeProvider(),
+        user_id=TEST_USER_ID,
+        immich_client=object(),
+        processing_concurrency=3,
+    )
+    orchestrator.job_service = MagicMock()
+    orchestrator.job_service.get_job.return_value = MagicMock(status="running")
+    assets = [
+        SimpleNamespace(id=f"asset-{index}", immich_id=f"image-{index}")
+        for index in range(6)
+    ]
+    orchestrator._prepare_asset = MagicMock(side_effect=lambda asset, _leaves, _job_id: (
+        PreparedRoutingAsset(
+            asset_id=asset.id,
+            immich_id=asset.immich_id,
+            prompt_run_id=f"prompt-{asset.id}",
+            messages=[],
+        )
+    ))
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def classify(_request):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return {}, MagicMock()
+
+    orchestrator._classify_prepared_asset = classify
+    orchestrator._save_prepared_result = MagicMock()
+
+    stopped = orchestrator._process_assets_in_parallel(
+        assets,
+        [],
+        MagicMock(),
+        "job-id",
+        len(assets),
+    )
+
+    assert stopped is False
+    assert peak == 3
+    assert orchestrator._save_prepared_result.call_count == 6
 
 
 def test_plan_groups_items_by_destination(db):

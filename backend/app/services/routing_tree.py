@@ -11,8 +11,10 @@ from typing import Optional, List, Dict, Any, Iterable
 from sqlalchemy.orm import Session
 
 from ..models.bucket import Bucket
+from ..models.routing_example import RoutingExample
 from ..schemas.bucket import (
     RoutingNodeCreate, RoutingNodeUpdate, RoutingNodeOut,
+    RoutingTreeTransfer, RoutingTreeTransferNode,
     VALID_DESTINATION_TYPES, VALID_PRIVACY_ACTIONS, VALID_QUALITY_LEVELS,
 )
 
@@ -100,11 +102,105 @@ class RoutingTreeService:
                 roots.append(outs[n.id])
         return roots
 
+    def export_settings(self) -> RoutingTreeTransfer:
+        def convert(node: Dict[str, Any]) -> RoutingTreeTransferNode:
+            values = {
+                field: node.get(field)
+                for field in RoutingNodeCreate.model_fields
+                if field != "parent_id"
+            }
+            return RoutingTreeTransferNode(
+                **values,
+                children=[convert(child) for child in node.get("children", [])],
+            )
+
+        return RoutingTreeTransfer(
+            version=1,
+            nodes=[convert(node) for node in self.build_tree()],
+        )
+
+    def replace_settings(
+        self,
+        transfer: RoutingTreeTransfer,
+    ) -> List[Dict[str, Any]]:
+        self._validate_transfer_tree(transfer.nodes)
+        try:
+            self.db.query(RoutingExample).filter(
+                RoutingExample.user_id == self.user_id,
+            ).delete(synchronize_session=False)
+            self.db.query(Bucket).filter(
+                Bucket.user_id == self.user_id,
+            ).delete(synchronize_session=False)
+            self.db.flush()
+
+            def create_branch(
+                node: RoutingTreeTransferNode,
+                parent_id: Optional[str] = None,
+            ) -> None:
+                values = node.model_dump(exclude={"children", "parent_id"})
+                created = self.create_node(
+                    RoutingNodeCreate(**values, parent_id=parent_id),
+                    commit=False,
+                )
+                for child in node.children:
+                    create_branch(child, created.id)
+
+            for root in transfer.nodes:
+                create_branch(root)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return self.build_tree()
+
+    def _validate_transfer_tree(
+        self,
+        roots: List[RoutingTreeTransferNode],
+    ) -> None:
+        paths: set[str] = set()
+        count = 0
+
+        def validate(node: RoutingTreeTransferNode, parent_path: str, depth: int) -> None:
+            nonlocal count
+            count += 1
+            if count > 500:
+                raise RoutingTreeError("Routing tree cannot contain more than 500 nodes")
+            if depth > 20:
+                raise RoutingTreeError("Routing tree cannot exceed 20 levels")
+            name = node.name.strip()
+            if not name:
+                raise RoutingTreeError("Routing node name cannot be empty")
+            if PATH_SEPARATOR in name:
+                raise RoutingTreeError(
+                    f"Routing node name must not contain '{PATH_SEPARATOR}'"
+                )
+            path = f"{parent_path}{PATH_SEPARATOR}{name}" if parent_path else name
+            if path in paths:
+                raise RoutingTreeError(f"Duplicate routing path: {path}")
+            paths.add(path)
+            self._validate_destination_type(node.destination_type)
+            self._validate_quality_level(node.minimum_quality)
+            self._validate_privacy_rules(node.privacy_rules)
+            self._validate_thresholds(
+                node.auto_apply_threshold,
+                node.review_below_threshold,
+            )
+            for child in node.children:
+                validate(child, path, depth + 1)
+
+        for root in roots:
+            validate(root, "", 1)
+
     # ------------------------------------------------------------------
     # Mutate
     # ------------------------------------------------------------------
 
-    def create_node(self, data: RoutingNodeCreate) -> Bucket:
+    def create_node(
+        self,
+        data: RoutingNodeCreate,
+        *,
+        commit: bool = True,
+    ) -> Bucket:
         self._validate_destination_type(data.destination_type)
         self._validate_quality_level(data.minimum_quality)
         self._validate_privacy_rules(data.privacy_rules)
@@ -162,8 +258,9 @@ class RoutingTreeService:
         self.db.flush()
         if parent:
             self._sync_leaf_status(parent.id)
-        self.db.commit()
-        self.db.refresh(node)
+        if commit:
+            self.db.commit()
+            self.db.refresh(node)
         return node
 
     def update_node(self, node_id: str, data: RoutingNodeUpdate) -> Bucket:
