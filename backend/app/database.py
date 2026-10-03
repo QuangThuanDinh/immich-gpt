@@ -70,7 +70,7 @@ def init_db():
         User, UserSession, PasswordResetToken,
         asset, bucket, prompt_run,
         job_run, audit_log, provider_config, app_setting,
-        routing_example, routing_plan,
+        routing_example, routing_plan, routing_evaluation,
     )
 
     try:

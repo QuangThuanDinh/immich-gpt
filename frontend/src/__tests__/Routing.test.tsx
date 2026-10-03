@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   deleteExampleMock: vi.fn(),
   promptPreviewMock: vi.fn(),
   classifyMock: vi.fn(),
+  evaluationMock: vi.fn(),
+  saveEvaluationMock: vi.fn(),
+  runEvaluationMock: vi.fn(),
+  runEvaluationItemMock: vi.fn(),
   plansMock: vi.fn(),
   planSummaryMock: vi.fn(),
   planItemsMock: vi.fn(),
@@ -39,6 +43,10 @@ vi.mock("../services/api", () => ({
   deleteRoutingExample: mocks.deleteExampleMock,
   getRoutingPromptPreview: mocks.promptPreviewMock,
   startRoutingClassify: mocks.classifyMock,
+  getRoutingEvaluation: mocks.evaluationMock,
+  saveRoutingEvaluation: mocks.saveEvaluationMock,
+  startRoutingEvaluation: mocks.runEvaluationMock,
+  runRoutingEvaluationItem: mocks.runEvaluationItemMock,
   listRoutingPlans: mocks.plansMock,
   getRoutingPlanSummary: mocks.planSummaryMock,
   getRoutingPlanItems: mocks.planItemsMock,
@@ -59,6 +67,7 @@ vi.mock("../services/api", () => ({
 const {
   treeMock, createMock, examplesMock, promptPreviewMock,
   classifyMock, plansMock, planSummaryMock, planItemsMock, updateItemMock,
+  evaluationMock, saveEvaluationMock, runEvaluationMock, runEvaluationItemMock,
   nodesMock, approveMock, rejectMock, applyMock,
   assetMock,
 } = mocks;
@@ -105,7 +114,41 @@ beforeEach(() => {
   applyMock.mockReset();
   assetMock.mockReset();
   classifyMock.mockReset();
+  evaluationMock.mockReset();
+  saveEvaluationMock.mockReset();
+  runEvaluationMock.mockReset();
+  runEvaluationItemMock.mockReset();
   classifyMock.mockResolvedValue({ job_id: "job-1", plan_id: "plan-1", status: "queued" });
+  evaluationMock.mockResolvedValue({
+    items: [],
+    total_score: null,
+    max_score: null,
+    evaluated_at: null,
+  });
+  saveEvaluationMock.mockResolvedValue({
+    items: [{
+      id: "eval-1",
+      immich_id: "immich-image-1",
+      expected_tag: "dog",
+      expected_destination: null,
+      result_tags: [],
+    }],
+    total_score: null,
+    max_score: null,
+    evaluated_at: null,
+  });
+  runEvaluationMock.mockResolvedValue({
+    items: [],
+    total_score: 0,
+    max_score: 0,
+    evaluated_at: "2026-10-02T00:00:00Z",
+  });
+  runEvaluationItemMock.mockResolvedValue({
+    items: [],
+    total_score: 0,
+    max_score: 0,
+    evaluated_at: "2026-10-02T00:00:00Z",
+  });
   applyMock.mockResolvedValue({ applied: 0, failed: 0 });
   assetMock.mockResolvedValue({
     id: "a1",
@@ -140,6 +183,165 @@ beforeEach(() => {
 });
 
 describe("Routing tree page", () => {
+  it("adds and saves evaluation items only after required input is valid", async () => {
+    treeMock.mockResolvedValue({ nodes: [] });
+    render(<Wrapper><Routing /></Wrapper>);
+
+    expect(await screen.findByRole("heading", { name: "Evaluation" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /Add item/i }));
+
+    const saveButton = screen.getByRole("button", { name: /^Save$/i });
+    expect(saveButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Image ID"), {
+      target: { value: "immich-image-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Expect to have tags"), {
+      target: { value: "dog, animal" },
+    });
+    fireEvent.change(screen.getByLabelText("Expect don't have tags"), {
+      target: { value: "cat, indoor" },
+    });
+
+    expect(screen.getByLabelText("Expect to have tags")).toHaveValue("dog, animal");
+    expect(screen.getByLabelText("Expect don't have tags")).toHaveValue("cat, indoor");
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(saveEvaluationMock).toHaveBeenCalledWith([
+        expect.objectContaining({
+          immich_id: "immich-image-1",
+          expected_tag: "dog,animal",
+          expected_absent_tag: "cat,indoor",
+        }),
+      ]);
+    });
+  });
+
+  it("adds new evaluation items at the top of the list", async () => {
+    treeMock.mockResolvedValue({ nodes: [] });
+    evaluationMock.mockResolvedValue({
+      items: [{
+        id: "eval-existing",
+        immich_id: "existing-image",
+        expected_tag: null,
+        expected_destination: null,
+        result_tags: [],
+      }],
+      total_score: null,
+      max_score: null,
+      evaluated_at: null,
+    });
+    render(<Wrapper><Routing /></Wrapper>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Add item/i }));
+
+    const imageIds = screen.getAllByLabelText("Image ID");
+    expect(imageIds).toHaveLength(2);
+    expect(imageIds[0]).toHaveValue("");
+    expect(imageIds[1]).toHaveValue("existing-image");
+  });
+
+  it("shows per-item evaluation progress and renders each completed result", async () => {
+    const item = (id: string, immichId: string) => ({
+      id,
+      immich_id: immichId,
+      expected_tag: "dog",
+      expected_destination: null,
+      result_description: null,
+      result_tags: [],
+      result_destination: null,
+      result_disposition: null,
+      tag_matched: null,
+      destination_matched: null,
+      score: null,
+      max_score: null,
+      error_message: null,
+      evaluated_at: null,
+    });
+    const first = item("eval-1", "image-1");
+    const second = item("eval-2", "image-2");
+    treeMock.mockResolvedValue({ nodes: [] });
+    evaluationMock.mockResolvedValue({
+      items: [first, second],
+      total_score: null,
+      max_score: null,
+      evaluated_at: null,
+    });
+    runEvaluationMock.mockResolvedValue({
+      items: [first, second],
+      total_score: 0,
+      max_score: 2,
+      evaluated_at: null,
+    });
+
+    const firstResult = deferred<ReturnType<typeof evaluationMock>>();
+    const secondResult = deferred<ReturnType<typeof evaluationMock>>();
+    runEvaluationItemMock
+      .mockImplementationOnce(() => firstResult.promise)
+      .mockImplementationOnce(() => secondResult.promise);
+
+    render(<Wrapper><Routing /></Wrapper>);
+    const evaluateButton = await screen.findByRole("button", { name: "Evaluate Routing" });
+    fireEvent.click(evaluateButton);
+
+    expect(await screen.findByRole("button", { name: "Evaluating 1 of 2" })).toBeDisabled();
+    expect(screen.getByLabelText("Evaluating item 1")).toBeInTheDocument();
+
+    await act(async () => {
+      firstResult.resolve({
+        items: [
+          {
+            ...first,
+            result_description: "A boy walking a dog.",
+            result_tags: ["dog"],
+            tag_matched: true,
+            score: 1,
+            max_score: 1,
+          },
+          second,
+        ],
+        total_score: 1,
+        max_score: 2,
+        evaluated_at: "2026-10-02T00:00:00Z",
+      });
+    });
+
+    expect(await screen.findByText("A boy walking a dog.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Evaluating 2 of 2" })).toBeDisabled();
+    expect(screen.getByLabelText("Evaluating item 2")).toBeInTheDocument();
+
+    await act(async () => {
+      secondResult.resolve({
+        items: [
+          {
+            ...first,
+            result_description: "A boy walking a dog.",
+            result_tags: ["dog"],
+            tag_matched: true,
+            score: 1,
+            max_score: 1,
+          },
+          {
+            ...second,
+            result_description: "Another dog.",
+            result_tags: ["dog"],
+            tag_matched: true,
+            score: 1,
+            max_score: 1,
+          },
+        ],
+        total_score: 2,
+        max_score: 2,
+        evaluated_at: "2026-10-02T00:00:01Z",
+      });
+    });
+
+    expect(await screen.findByRole("button", { name: "Evaluate Routing" })).toBeEnabled();
+    expect(screen.getByText("Latest total: 2 / 2")).toBeInTheDocument();
+  });
+
   it("renders nested nodes", async () => {
     treeMock.mockResolvedValue({
       nodes: [

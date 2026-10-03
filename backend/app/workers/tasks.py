@@ -10,9 +10,8 @@ from ..services.job_progress import JobProgressService
 from ..services.asset_sync import AssetSyncService
 from ..services.immich_client import ImmichClient
 from ..services.routing_classification import RoutingClassificationOrchestrator
-from ..services.ai_provider import build_provider
+from ..services.provider_resolver import resolve_user_provider
 from ..services.secret_store import decrypt_secret
-from ..models.provider_config import ProviderConfig
 
 
 def _immich_client_context(client):
@@ -142,34 +141,7 @@ def run_routing_classification(
     try:
         if not user_id:
             raise ValueError("Job is missing an owner")
-        q = db.query(ProviderConfig)
-        q = q.filter(ProviderConfig.user_id == user_id)
-        provider_cfg = q.filter(
-            ProviderConfig.is_default == True,
-            ProviderConfig.enabled == True,
-        ).first()
-        if not provider_cfg:
-            provider_cfg = q.filter(ProviderConfig.enabled == True).first()
-        if not provider_cfg:
-            from ..config import settings
-            if settings.OPENAI_API_KEY:
-                provider = build_provider("openai", {
-                    "api_key": settings.OPENAI_API_KEY,
-                    "model_name": settings.OPENAI_MODEL,
-                })
-            else:
-                raise ValueError(
-                    "No AI provider configured. Set OPENAI_API_KEY or configure a provider."
-                )
-        else:
-            cfg_dict = {
-                "api_key": decrypt_secret(provider_cfg.api_key_encrypted) or "",
-                "model_name": provider_cfg.model_name,
-                "base_url": provider_cfg.base_url,
-            }
-            if provider_cfg.extra_config_json:
-                cfg_dict.update(provider_cfg.extra_config_json)
-            provider = build_provider(provider_cfg.provider_name, cfg_dict)
+        provider = resolve_user_provider(db, user_id)
 
         with _immich_client_context(_get_user_immich_client(db, user_id)) as immich:
             orch = RoutingClassificationOrchestrator(

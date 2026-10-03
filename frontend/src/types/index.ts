@@ -146,6 +146,38 @@ export interface RoutingExample {
   created_at: string;
 }
 
+export const ROUTING_EVALUATION_TRASH = "__trash__";
+
+export interface RoutingEvaluationItemInput {
+  id?: string;
+  immich_id: string;
+  expected_tag?: string | null;
+  expected_absent_tag?: string | null;
+  expected_destination?: string | null;
+}
+
+export interface RoutingEvaluationItem extends RoutingEvaluationItemInput {
+  id: string;
+  result_description?: string | null;
+  result_tags: string[];
+  result_destination?: string | null;
+  result_disposition?: string | null;
+  tag_matched?: boolean | null;
+  absent_tag_matched?: boolean | null;
+  destination_matched?: boolean | null;
+  score?: number | null;
+  max_score?: number | null;
+  error_message?: string | null;
+  evaluated_at?: string | null;
+}
+
+export interface RoutingEvaluation {
+  items: RoutingEvaluationItem[];
+  total_score?: number | null;
+  max_score?: number | null;
+  evaluated_at?: string | null;
+}
+
 export interface RoutingPlan {
   id: string;
   job_id?: string | null;

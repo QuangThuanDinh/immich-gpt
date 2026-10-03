@@ -13,6 +13,8 @@ import type {
   RoutingPlanItem,
   RoutingPlanItemUpdate,
   RoutingPlanSummary,
+  RoutingEvaluation,
+  RoutingEvaluationItemInput,
 } from "../types";
 
 const api = axios.create({
@@ -259,6 +261,29 @@ export const startRoutingClassify = (data?: {
   api.post("/routing/classify", data ?? {}).then(
     (r) => r.data as { job_id: string; plan_id: string; status: string }
   );
+
+export const getRoutingEvaluation = (): Promise<RoutingEvaluation> =>
+  api.get("/routing/evaluation").then((r) => r.data);
+
+export const saveRoutingEvaluation = (
+  items: RoutingEvaluationItemInput[]
+): Promise<RoutingEvaluation> =>
+  api.put("/routing/evaluation", { items }).then((r) => r.data);
+
+export const runRoutingEvaluation = (
+  items: RoutingEvaluationItemInput[]
+): Promise<RoutingEvaluation> =>
+  api.post("/routing/evaluation/run", { items }).then((r) => r.data);
+
+export const startRoutingEvaluation = (
+  items: RoutingEvaluationItemInput[]
+): Promise<RoutingEvaluation> =>
+  api.post("/routing/evaluation/run/start", { items }).then((r) => r.data);
+
+export const runRoutingEvaluationItem = (
+  itemId: string
+): Promise<RoutingEvaluation> =>
+  api.post(`/routing/evaluation/items/${itemId}/run`).then((r) => r.data);
 
 export const listRoutingPlans = (params?: { status?: string }): Promise<RoutingPlan[]> =>
   api.get("/routing/plans", { params }).then((r) => r.data);

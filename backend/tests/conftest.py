@@ -18,6 +18,7 @@ import app.models.provider_config  # noqa
 import app.models.app_setting  # noqa
 import app.models.routing_example  # noqa
 import app.models.routing_plan  # noqa
+import app.models.routing_evaluation  # noqa
 
 from app.database import Base, get_db
 from app.main import app

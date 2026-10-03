@@ -10,6 +10,7 @@ import {
 } from "../services/api";
 import type { RoutingNode } from "../types";
 import RoutingLeafEditor from "../components/RoutingLeafEditor";
+import RoutingEvaluationPanel from "../components/RoutingEvaluationPanel";
 import RunRoutingButton from "../components/RunRoutingButton";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import masterDetail from "../styles/MasterDetail.module.css";
@@ -391,6 +392,7 @@ export default function Routing() {
           </div>
         </div>
       </div>
+      <RoutingEvaluationPanel destinations={enabledLeafPaths(tree)} />
     </div>
   );
 }
@@ -403,4 +405,16 @@ function flatten(nodes: RoutingNode[]): RoutingNode[] {
   };
   nodes.forEach(walk);
   return out;
+}
+
+function enabledLeafPaths(nodes: RoutingNode[], ancestorsEnabled = true): string[] {
+  const paths: string[] = [];
+  for (const node of nodes) {
+    const enabled = ancestorsEnabled && node.enabled;
+    if (enabled && node.is_leaf && node.destination_type !== "immich_trash") {
+      paths.push(node.path);
+    }
+    paths.push(...enabledLeafPaths(node.children ?? [], enabled));
+  }
+  return paths;
 }

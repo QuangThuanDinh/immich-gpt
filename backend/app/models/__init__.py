@@ -9,6 +9,7 @@ from .provider_config import ProviderConfig
 from .app_setting import AppSetting
 from .routing_example import RoutingExample
 from .routing_plan import RoutingPlan, RoutingPlanItem
+from .routing_evaluation import RoutingEvaluation, RoutingEvaluationItem
 
 __all__ = [
     "User",
@@ -24,4 +25,6 @@ __all__ = [
     "RoutingExample",
     "RoutingPlan",
     "RoutingPlanItem",
+    "RoutingEvaluation",
+    "RoutingEvaluationItem",
 ]
