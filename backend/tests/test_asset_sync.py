@@ -5,12 +5,14 @@ from tests.conftest import TEST_USER_ID
 
 
 class _PagedImmich:
-    def __init__(self, pages, trashed_pages=None, details=None):
+    def __init__(self, pages, trashed_pages=None, details=None, faces=None):
         self.pages = pages
         self.trashed_pages = trashed_pages or {}
         self.details = details or {}
+        self.faces = faces or {}
         self.trashed_calls = []
         self.detail_calls = []
+        self.face_calls = []
 
     def list_assets(self, page=1, page_size=100, **kwargs):
         return self.pages.get(page, [])
@@ -31,6 +33,10 @@ class _PagedImmich:
                 if asset.get("id") == asset_id:
                     return asset
         raise RuntimeError(f"Unknown asset {asset_id}")
+
+    def get_asset_faces(self, asset_id):
+        self.face_calls.append(asset_id)
+        return self.faces.get(asset_id, [])
 
     def is_external_library_asset(self, raw):
         return False
@@ -66,7 +72,27 @@ def test_sync_hydrates_tags_and_people_from_asset_detail(db):
             "isFavorite": True,
         }],
     )
-    immich = _PagedImmich({1: [summary]}, details={"photo": detail})
+    immich = _PagedImmich(
+        {1: [summary]},
+        details={"photo": detail},
+        faces={
+            "photo": [{
+                "id": "face-1",
+                "boundingBoxX1": 10,
+                "boundingBoxY1": 20,
+                "boundingBoxX2": 110,
+                "boundingBoxY2": 140,
+                "imageWidth": 1920,
+                "imageHeight": 1440,
+                "sourceType": "machine-learning",
+                "person": {
+                    "id": "person-1",
+                    "name": "Kelly",
+                    "thumbnailPath": "/private/upstream/path.jpg",
+                },
+            }],
+        },
+    )
     service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
 
     result = service.sync_all(page_size=10)
@@ -74,6 +100,7 @@ def test_sync_hydrates_tags_and_people_from_asset_detail(db):
     asset = db.query(Asset).filter(Asset.immich_id == "photo").one()
     assert result["errors"] == 0
     assert immich.detail_calls == ["photo"]
+    assert immich.face_calls == ["photo"]
     assert asset.tags_json == ["ramen"]
     assert asset.people_json == [{
         "id": "person-1",
@@ -81,9 +108,22 @@ def test_sync_hydrates_tags_and_people_from_asset_detail(db):
         "is_hidden": False,
         "is_favorite": True,
     }]
+    assert asset.faces_json == [{
+        "id": "face-1",
+        "bounding_box_x1": 10,
+        "bounding_box_y1": 20,
+        "bounding_box_x2": 110,
+        "bounding_box_y2": 140,
+        "image_width": 1920,
+        "image_height": 1440,
+        "source_type": "machine-learning",
+        "person_id": "person-1",
+        "person_name": "Kelly",
+    }]
     assert asset.album_ids_json == ["album-1"]
     assert asset.raw_metadata_json["tags"][0]["name"] == "ramen"
     assert "thumbnailPath" in asset.raw_metadata_json["people"][0]
+    assert "_faces" not in asset.raw_metadata_json
 
 
 def test_sync_reports_asset_detail_failure_without_storing_summary(db):
@@ -380,6 +420,9 @@ def test_multiple_albums_reconcile_once_after_all_albums(db):
                 "motion": _raw_asset("motion", "VIDEO"),
             }[asset_id]
 
+        def get_asset_faces(self, asset_id):
+            return []
+
         def is_external_library_asset(self, raw):
             return False
 
@@ -417,6 +460,9 @@ def test_album_sync_filters_motion_referenced_by_trashed_still(db):
 
         def get_asset(self, asset_id):
             return _raw_asset(asset_id, "VIDEO")
+
+        def get_asset_faces(self, asset_id):
+            return []
 
         def is_external_library_asset(self, raw):
             return False

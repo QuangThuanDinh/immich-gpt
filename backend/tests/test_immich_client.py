@@ -55,6 +55,87 @@ def test_get_thumbnail_returns_bytes():
     assert result == fake_bytes
 
 
+def test_get_asset_faces_returns_face_regions():
+    client = ImmichClient("http://immich.local", "key")
+    faces = [{"id": "face-1", "boundingBoxX1": 10}]
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.get.return_value = make_mock_response(200, faces)
+
+    with patch.object(client, "_client", return_value=mock_http):
+        result = client.get_asset_faces("asset-123")
+
+    assert result == faces
+    mock_http.get.assert_called_once_with(
+        "/api/faces",
+        params={"id": "asset-123"},
+    )
+
+
+def test_get_asset_faces_rejects_invalid_response():
+    client = ImmichClient("http://immich.local", "key")
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.get.return_value = make_mock_response(200, {"faces": []})
+
+    with patch.object(client, "_client", return_value=mock_http):
+        with pytest.raises(ImmichError, match="Invalid face response"):
+            client.get_asset_faces("asset-123")
+
+
+def test_get_asset_faces_retries_transient_transport_error():
+    client = ImmichClient("http://immich.local", "key")
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.get.side_effect = [
+        httpx.ConnectError("connection refused"),
+        make_mock_response(200, []),
+    ]
+
+    with patch.object(client, "_client", return_value=mock_http):
+        with patch("app.services.immich_client.time.sleep") as sleep:
+            assert client.get_asset_faces("asset-123") == []
+
+    assert mock_http.get.call_count == 2
+    sleep.assert_called_once_with(0.5)
+
+
+def test_get_asset_faces_retries_transient_server_error():
+    client = ImmichClient("http://immich.local", "key")
+    unavailable = make_mock_response(503, {"message": "Unavailable"})
+    success = make_mock_response(200, [])
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.get.side_effect = [unavailable, success]
+
+    with patch.object(client, "_client", return_value=mock_http):
+        with patch("app.services.immich_client.time.sleep") as sleep:
+            assert client.get_asset_faces("asset-123") == []
+
+    unavailable.close.assert_called_once()
+    sleep.assert_called_once_with(0.5)
+
+
+def test_get_asset_faces_raises_after_retry_limit():
+    client = ImmichClient("http://immich.local", "key")
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.get.side_effect = httpx.ConnectError("connection refused")
+
+    with patch.object(client, "_client", return_value=mock_http):
+        with patch("app.services.immich_client.time.sleep") as sleep:
+            with pytest.raises(httpx.ConnectError, match="connection refused"):
+                client.get_asset_faces("asset-123")
+
+    assert mock_http.get.call_count == 4
+    assert [call.args[0] for call in sleep.call_args_list] == [0.5, 1.0, 2.0]
+
+
 def test_get_thumbnail_raises_on_404():
     client = ImmichClient("http://immich.local", "key")
     mock_http = MagicMock()

@@ -154,6 +154,18 @@ def test_get_asset_optional_fields(client, db):
         "is_hidden": False,
         "is_favorite": True,
     }]
+    a.faces_json = [{
+        "id": "face-1",
+        "bounding_box_x1": 10,
+        "bounding_box_y1": 20,
+        "bounding_box_x2": 110,
+        "bounding_box_y2": 140,
+        "image_width": 1920,
+        "image_height": 1440,
+        "source_type": "machine-learning",
+        "person_id": "person-1",
+        "person_name": "Kelly",
+    }]
     db.commit()
 
     data = client.get(f"/api/assets/{a.id}").json()
@@ -168,3 +180,5 @@ def test_get_asset_optional_fields(client, db):
         "is_hidden": False,
         "is_favorite": True,
     }]
+    assert data["faces"][0]["person_name"] == "Kelly"
+    assert data["faces"][0]["bounding_box_x1"] == 10

@@ -10,6 +10,19 @@ class AssetPersonOut(BaseModel):
     is_favorite: bool = False
 
 
+class AssetFaceOut(BaseModel):
+    id: str
+    bounding_box_x1: int
+    bounding_box_y1: int
+    bounding_box_x2: int
+    bounding_box_y2: int
+    image_width: int
+    image_height: int
+    source_type: Optional[str] = None
+    person_id: Optional[str] = None
+    person_name: Optional[str] = None
+
+
 class AssetOut(BaseModel):
     id: str
     immich_id: str
@@ -24,6 +37,7 @@ class AssetOut(BaseModel):
     description: Optional[str]
     tags: Optional[List[str]]
     people: Optional[List[AssetPersonOut]]
+    faces: Optional[List[AssetFaceOut]]
     album_ids: Optional[List[str]]
     is_favorite: bool
     is_archived: bool

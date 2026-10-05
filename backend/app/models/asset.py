@@ -27,6 +27,7 @@ class Asset(Base):
     description = Column(Text, nullable=True)
     tags_json = Column(JSON, nullable=True)
     people_json = Column(JSON, nullable=True)
+    faces_json = Column(JSON, nullable=True)
     album_ids_json = Column(JSON, nullable=True)
     raw_metadata_json = Column(JSON, nullable=True)
     synced_at = Column(DateTime, nullable=True)

@@ -12,6 +12,7 @@ export interface Asset {
   description?: string;
   tags?: string[];
   people?: AssetPerson[];
+  faces?: AssetFace[];
   album_ids?: string[];
   is_favorite: boolean;
   is_archived: boolean;
@@ -25,6 +26,19 @@ export interface AssetPerson {
   name: string;
   is_hidden: boolean;
   is_favorite: boolean;
+}
+
+export interface AssetFace {
+  id: string;
+  bounding_box_x1: number;
+  bounding_box_y1: number;
+  bounding_box_x2: number;
+  bounding_box_y2: number;
+  image_width: number;
+  image_height: number;
+  source_type?: string;
+  person_id?: string;
+  person_name?: string;
 }
 
 export interface JobRun {

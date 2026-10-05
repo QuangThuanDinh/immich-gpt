@@ -2,9 +2,11 @@
 ImmichClient: all Immich API communication.
 All Immich HTTP calls are isolated here.
 """
-import httpx
+import time
 from contextlib import contextmanager
 from typing import Optional, List, Dict, Any, Iterator
+
+import httpx
 from ..config import settings
 from .url_validation import ServiceUrlError, validate_service_url
 
@@ -16,6 +18,10 @@ class ImmichError(Exception):
 
 
 class ImmichClient:
+    _GET_RETRY_ATTEMPTS = 4
+    _GET_RETRY_BACKOFF_SECONDS = 0.5
+    _GET_RETRY_STATUS_CODES = {429, 502, 503, 504}
+
     def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
         raw_base_url = base_url or settings.IMMICH_URL
         try:
@@ -49,6 +55,28 @@ class ImmichClient:
             headers=self._headers,
             timeout=30,
         )
+
+    def _get_with_retry(
+        self,
+        client: httpx.Client,
+        path: str,
+        **kwargs,
+    ) -> httpx.Response:
+        for attempt in range(self._GET_RETRY_ATTEMPTS):
+            try:
+                response = client.get(path, **kwargs)
+            except httpx.TransportError:
+                if attempt == self._GET_RETRY_ATTEMPTS - 1:
+                    raise
+            else:
+                if (
+                    response.status_code not in self._GET_RETRY_STATUS_CODES
+                    or attempt == self._GET_RETRY_ATTEMPTS - 1
+                ):
+                    return response
+                response.close()
+            time.sleep(self._GET_RETRY_BACKOFF_SECONDS * (2 ** attempt))
+        raise RuntimeError("Immich GET retry loop exhausted")
 
     @contextmanager
     def _client_context(self) -> Iterator[httpx.Client]:
@@ -191,10 +219,31 @@ class ImmichClient:
     def get_asset(self, asset_id: str) -> Dict[str, Any]:
         """Get full asset metadata."""
         with self._client_context() as client:
-            r = client.get(f"/api/assets/{asset_id}")
+            r = self._get_with_retry(client, f"/api/assets/{asset_id}")
             if r.status_code != 200:
                 raise ImmichError(f"Asset {asset_id} not found", r.status_code)
             return r.json()
+
+    def get_asset_faces(self, asset_id: str) -> List[Dict[str, Any]]:
+        """Get detected face regions and person associations for an asset."""
+        with self._client_context() as client:
+            r = self._get_with_retry(
+                client,
+                "/api/faces",
+                params={"id": asset_id},
+            )
+            if r.status_code != 200:
+                raise ImmichError(
+                    f"Failed to get faces for asset {asset_id}",
+                    r.status_code,
+                )
+            data = r.json()
+            if not isinstance(data, list):
+                raise ImmichError(
+                    f"Invalid face response for asset {asset_id}",
+                    r.status_code,
+                )
+            return data
 
     def get_thumbnail(self, asset_id: str, size: str = "thumbnail") -> bytes:
         """
@@ -203,7 +252,8 @@ class ImmichClient:
         Never returns a private URL to external callers.
         """
         with self._client_context() as client:
-            r = client.get(
+            r = self._get_with_retry(
+                client,
                 f"/api/assets/{asset_id}/thumbnail",
                 params={"size": size},
                 headers={**self._headers, "Accept": "image/*"},
@@ -217,7 +267,8 @@ class ImmichClient:
     def get_person_thumbnail(self, person_id: str) -> bytes:
         """Fetch the representative face thumbnail for an Immich person."""
         with self._client_context() as client:
-            r = client.get(
+            r = self._get_with_retry(
+                client,
                 f"/api/people/{person_id}/thumbnail",
                 headers={**self._headers, "Accept": "image/*"},
             )

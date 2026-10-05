@@ -26,6 +26,7 @@ def _to_out(a: Asset) -> AssetOut:
         description=a.description,
         tags=a.tags_json,
         people=a.people_json,
+        faces=a.faces_json,
         album_ids=a.album_ids_json,
         is_favorite=a.is_favorite,
         is_archived=a.is_archived,

@@ -245,7 +245,12 @@ class AssetSyncService:
             page += 1
 
     _COMMIT_BATCH_SIZE = 100
-    _DETAIL_FETCH_CONCURRENCY = 8
+    _DETAIL_FETCH_CONCURRENCY = 4
+
+    def _hydrate_asset(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        detailed = self.immich.get_asset(raw["id"])
+        faces = self.immich.get_asset_faces(raw["id"])
+        return {**raw, **detailed, "_faces": faces}
 
     def _sync_paged(
         self,
@@ -285,14 +290,13 @@ class AssetSyncService:
             workers = min(self._DETAIL_FETCH_CONCURRENCY, len(raw_assets))
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 detail_futures = [
-                    executor.submit(self.immich.get_asset, raw["id"])
+                    executor.submit(self._hydrate_asset, raw)
                     for raw in raw_assets
                 ]
 
             for raw, detail_future in zip(raw_assets, detail_futures):
                 try:
-                    detailed = detail_future.result()
-                    hydrated = {**raw, **detailed}
+                    hydrated = detail_future.result()
                     c, u, asset_id = self._upsert_asset(hydrated, synced_at)
                     created += c
                     updated += u
@@ -389,6 +393,36 @@ class AssetSyncService:
                 "is_hidden": bool(person.get("isHidden", False)),
                 "is_favorite": bool(person.get("isFavorite", False)),
             })
+        faces = []
+        for face in raw.get("_faces") or []:
+            face_id = face.get("id")
+            box_values = [
+                face.get("boundingBoxX1"),
+                face.get("boundingBoxY1"),
+                face.get("boundingBoxX2"),
+                face.get("boundingBoxY2"),
+                face.get("imageWidth"),
+                face.get("imageHeight"),
+            ]
+            if not face_id or not all(
+                isinstance(value, int) and not isinstance(value, bool)
+                for value in box_values
+            ):
+                continue
+            person = face.get("person") or {}
+            faces.append({
+                "id": face_id,
+                "bounding_box_x1": box_values[0],
+                "bounding_box_y1": box_values[1],
+                "bounding_box_x2": box_values[2],
+                "bounding_box_y2": box_values[3],
+                "image_width": box_values[4],
+                "image_height": box_values[5],
+                "source_type": face.get("sourceType"),
+                "person_id": person.get("id"),
+                "person_name": person.get("name"),
+            })
+        raw_metadata = {key: value for key, value in raw.items() if key != "_faces"}
 
         data = {
             "immich_id": immich_id,
@@ -410,8 +444,9 @@ class AssetSyncService:
             "description": raw.get("exifInfo", {}).get("description") if raw.get("exifInfo") else None,
             "tags_json": tags,
             "people_json": people,
+            "faces_json": faces,
             "album_ids_json": [a.get("id") for a in (raw.get("albums") or []) if a.get("id")],
-            "raw_metadata_json": raw,
+            "raw_metadata_json": raw_metadata,
             "synced_at": synced_at,
         }
 
