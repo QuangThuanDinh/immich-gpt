@@ -202,10 +202,24 @@ class RoutingEvaluationService:
                 )
 
             messages = orchestrator.assemble_routing_messages(asset, leaves)
+            face_annotations = orchestrator._recognized_face_annotations(asset)
             asset_immich_id = asset.immich_id
             self.db.rollback()
-            image_payload = image_service.prepare_for_provider(asset_immich_id)
-            raw = self.provider.classify_routing(messages, image_payload)
+            if face_annotations:
+                image_payload = image_service.prepare_for_provider(
+                    asset_immich_id,
+                    face_annotations=face_annotations,
+                )
+            else:
+                image_payload = image_service.prepare_for_provider(asset_immich_id)
+            raw = orchestrator._call_provider(
+                messages,
+                image_payload,
+                trusted_names=[
+                    annotation["person_name"]
+                    for annotation in face_annotations
+                ],
+            )
             ai_result = AIRoutingResult.model_validate(raw)
             decision = orchestrator.decision_service.resolve_routing(ai_result, leaves)
 

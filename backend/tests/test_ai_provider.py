@@ -7,6 +7,7 @@ from app.config import settings
 from app.services.ai_provider import (
     OpenAIProvider,
     OpenRouterProvider,
+    _inject_image,
     get_openrouter_api_base_url,
     build_provider,
 )
@@ -18,6 +19,21 @@ def test_openai_provider_sets_default_timeout():
         OpenAIProvider("key")
 
     openai.assert_called_once_with(api_key="key", timeout=120)
+
+
+def test_inject_image_uses_payload_detail_override():
+    messages = [{"role": "user", "content": "Describe the photo"}]
+
+    result = _inject_image(
+        messages,
+        {
+            "data_url": "data:image/jpeg;base64,ZmFrZQ==",
+            "detail": "high",
+        },
+        detail="low",
+    )
+
+    assert result[0]["content"][1]["image_url"]["detail"] == "high"
 
 
 def test_build_provider_allows_openai_timeout_override():

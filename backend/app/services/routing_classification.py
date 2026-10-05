@@ -40,6 +40,12 @@ Respect each leaf's description, positive criteria, negative criteria, quality r
 Do not invent paths.
 If no path fits, return review_required=true and primary_path=null.
 If an asset appears unsafe for a destination because of privacy or quality rules, set review_required=true or choose another destination.
+
+Write metadata descriptions as natural, concise captions for the people who own the photo.
+Use trusted Immich names naturally when supplied. Do not reintroduce named people as "a child", "an adult", "a man", or "a woman".
+Focus on the memorable moment, activity, setting, and atmosphere. Avoid journalistic, forensic, surveillance, and accessibility-alt-text wording.
+Do not describe clothing or physical appearance unless it is important to the moment. Do not infer relationships or identities.
+Descriptions should normally be one natural sentence.
 """
 
 
@@ -49,6 +55,7 @@ class PreparedRoutingAsset:
     immich_id: str
     prompt_run_id: str
     messages: List[Dict[str, Any]]
+    face_annotations: tuple[Dict[str, Any], ...] = ()
 
 
 class RoutingClassificationOrchestrator:
@@ -228,7 +235,8 @@ class RoutingClassificationOrchestrator:
                 for offset, (request, future) in enumerate(zip(prepared, futures)):
                     index = batch_start + offset
                     try:
-                        raw, ai_result = future.result()
+                        raw, ai_result, retry_events = future.result()
+                        self._log_identity_retry_events(job_id, retry_events)
                         self._save_prepared_result(
                             request, raw, ai_result, leaves, plan,
                         )
@@ -265,7 +273,8 @@ class RoutingClassificationOrchestrator:
     ) -> None:
         request = self._prepare_asset(asset, leaves, job_id)
         try:
-            raw, ai_result = self._classify_prepared_asset(request)
+            raw, ai_result, retry_events = self._classify_prepared_asset(request)
+            self._log_identity_retry_events(job_id, retry_events)
         except Exception as exc:
             self._save_prepared_error(request, exc)
             raise
@@ -280,6 +289,7 @@ class RoutingClassificationOrchestrator:
         asset_id = asset.id
         asset_immich_id = asset.immich_id
         messages = self.assemble_routing_messages(asset, leaves)
+        face_annotations = tuple(self._recognized_face_annotations(asset))
 
         prompt_run = PromptRun(
             id=str(uuid.uuid4()),
@@ -301,15 +311,41 @@ class RoutingClassificationOrchestrator:
             immich_id=asset_immich_id,
             prompt_run_id=prompt_run_id,
             messages=messages,
+            face_annotations=face_annotations,
         )
 
     def _classify_prepared_asset(
         self,
         request: PreparedRoutingAsset,
-    ) -> tuple[Dict[str, Any], AIRoutingResult]:
-        image_payload = self.image_service.prepare_for_provider(request.immich_id)
-        raw = self._call_provider(request.messages, image_payload)
-        return raw, AIRoutingResult.model_validate(raw)
+    ) -> tuple[Dict[str, Any], AIRoutingResult, List[str]]:
+        if request.face_annotations:
+            image_payload = self.image_service.prepare_for_provider(
+                request.immich_id,
+                face_annotations=list(request.face_annotations),
+            )
+        else:
+            image_payload = self.image_service.prepare_for_provider(request.immich_id)
+        trusted_names = [
+            annotation["person_name"]
+            for annotation in request.face_annotations
+        ]
+        retry_events: List[str] = []
+        raw = self._call_provider(
+            request.messages,
+            image_payload,
+            trusted_names=trusted_names,
+            asset_id=request.immich_id,
+            retry_events=retry_events,
+        )
+        return raw, AIRoutingResult.model_validate(raw), retry_events
+
+    def _log_identity_retry_events(
+        self,
+        job_id: str,
+        retry_events: List[str],
+    ) -> None:
+        for event in retry_events:
+            self.job_service.update_progress(job_id, log_line=event)
 
     def _save_prepared_result(
         self,
@@ -395,17 +431,110 @@ class RoutingClassificationOrchestrator:
             parts.append(f"Current description: {asset.description}")
         if asset.tags_json:
             parts.append(f"Current tags: {', '.join(asset.tags_json)}")
+        face_annotations = self._recognized_face_annotations(asset)
+        if face_annotations:
+            parts.append(
+                "Trusted Immich identity labels (matching numbered face boxes):"
+            )
+            for annotation in face_annotations:
+                parts.append(
+                    f"Face {annotation['label']} = {annotation['person_name']}"
+                )
+            parts.append(
+                "Use these names naturally for the matching faces. "
+                "Do not mention boxes, labels, coordinates, or face recognition."
+            )
+            parts.append(
+                "Every trusted name above must appear exactly as written in "
+                "metadata.description."
+            )
         return "\n".join(parts) or "No metadata available."
+
+    def _recognized_face_annotations(
+        self,
+        asset: Asset,
+    ) -> List[Dict[str, Any]]:
+        annotations = []
+        for face in asset.faces_json or []:
+            if not isinstance(face, dict):
+                continue
+            if not face.get("person_id") or not face.get("person_name"):
+                continue
+            annotations.append({
+                **face,
+                "label": len(annotations) + 1,
+            })
+        return annotations
 
     # ------------------------------------------------------------------
     # Provider call
     # ------------------------------------------------------------------
 
     def _call_provider(
-        self, messages: List[Dict[str, Any]], image_payload: Optional[dict],
+        self,
+        messages: List[Dict[str, Any]],
+        image_payload: Optional[dict],
+        trusted_names: Optional[List[str]] = None,
+        asset_id: Optional[str] = None,
+        retry_events: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Ask the provider to return a routing JSON object."""
-        return self.provider.classify_routing(messages, image_payload)
+        raw = self.provider.classify_routing(messages, image_payload)
+        missing_names = self._missing_description_names(raw, trusted_names or [])
+        if not missing_names:
+            return raw
+
+        if asset_id and retry_events is not None:
+            retry_events.append(
+                f"Identity caption retry for asset {asset_id}: description "
+                f"omitted {len(missing_names)} trusted "
+                f"name{'s' if len(missing_names) != 1 else ''}"
+            )
+        correction = (
+            "Correct the previous JSON response. Its metadata.description "
+            f"omitted these trusted Immich names: {', '.join(missing_names)}. "
+            "Include every name exactly as written in one natural personal-photo "
+            "caption. Do not change the output schema or mention identity labels."
+        )
+        corrected_messages = [
+            *messages,
+            {"role": "assistant", "content": json.dumps(raw)},
+            {"role": "user", "content": correction},
+        ]
+        corrected = self.provider.classify_routing(
+            corrected_messages,
+            image_payload,
+        )
+        still_missing = self._missing_description_names(
+            corrected,
+            trusted_names or [],
+        )
+        if still_missing:
+            if asset_id and retry_events is not None:
+                retry_events.append(
+                    f"Identity caption retry incomplete for asset {asset_id}: "
+                    f"saving last response with {len(still_missing)} trusted "
+                    f"name{'s' if len(still_missing) != 1 else ''} omitted"
+                )
+        elif asset_id and retry_events is not None:
+            retry_events.append(
+                f"Identity caption retry succeeded for asset {asset_id}"
+            )
+        return corrected
+
+    def _missing_description_names(
+        self,
+        raw: Dict[str, Any],
+        trusted_names: List[str],
+    ) -> List[str]:
+        metadata = raw.get("metadata")
+        description = metadata.get("description") if isinstance(metadata, dict) else None
+        normalized = description.casefold() if isinstance(description, str) else ""
+        return [
+            name
+            for name in dict.fromkeys(trusted_names)
+            if name.casefold() not in normalized
+        ]
 
     # ------------------------------------------------------------------
     # Auto-apply

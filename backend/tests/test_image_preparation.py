@@ -89,3 +89,32 @@ def test_data_url_is_valid_base64():
     # Should decode without error
     decoded = base64.b64decode(b64)
     assert len(decoded) > 0
+
+
+def test_prepare_annotates_recognized_faces_at_high_detail():
+    mock_client = MagicMock()
+    mock_client.get_thumbnail.return_value = _make_jpeg_bytes()
+    svc = ImagePreparationService(immich_client=mock_client)
+
+    result = svc.prepare_for_provider(
+        "asset-with-faces",
+        face_annotations=[{
+            "label": 1,
+            "person_id": "person-1",
+            "person_name": "Kelly",
+            "bounding_box_x1": 10,
+            "bounding_box_y1": 10,
+            "bounding_box_x2": 60,
+            "bounding_box_y2": 70,
+            "image_width": 100,
+            "image_height": 100,
+        }],
+    )
+
+    mock_client.get_thumbnail.assert_called_once_with(
+        "asset-with-faces",
+        size="preview",
+    )
+    assert result["detail"] == "high"
+    assert result["annotated_faces"] == 1
+    assert result["mime_type"] == "image/jpeg"

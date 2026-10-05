@@ -65,8 +65,9 @@ def _inject_image(
             if isinstance(content, str):
                 content = [{"type": "text", "text": content}]
             image_url: Dict[str, Any] = {"url": image_payload["data_url"]}
-            if detail:
-                image_url["detail"] = detail
+            image_detail = image_payload.get("detail", detail)
+            if detail and image_detail:
+                image_url["detail"] = image_detail
             content.append({"type": "image_url", "image_url": image_url})
             msgs[i] = {"role": "user", "content": content}
             break

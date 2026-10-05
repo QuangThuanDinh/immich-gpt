@@ -369,6 +369,162 @@ def test_process_asset_stops_when_image_preparation_fails(db):
         orchestrator._process_asset(asset, [], None, "job-id")
 
 
+def test_routing_uses_face_labels_and_personal_caption_prompt(db):
+    orchestrator = _make_orchestrator(db)
+    asset = _make_asset(db, "asset-with-recognized-faces")
+    asset.faces_json = [
+        {
+            "id": "face-1",
+            "bounding_box_x1": 10,
+            "bounding_box_y1": 20,
+            "bounding_box_x2": 110,
+            "bounding_box_y2": 140,
+            "image_width": 1920,
+            "image_height": 1440,
+            "source_type": "machine-learning",
+            "person_id": "person-1",
+            "person_name": "Kelly",
+        },
+        {
+            "id": "face-2",
+            "bounding_box_x1": 200,
+            "bounding_box_y1": 40,
+            "bounding_box_x2": 300,
+            "bounding_box_y2": 180,
+            "image_width": 1920,
+            "image_height": 1440,
+            "source_type": "machine-learning",
+            "person_id": None,
+            "person_name": None,
+        },
+    ]
+    db.commit()
+
+    request = orchestrator._prepare_asset(asset, [], "job-id")
+
+    assert len(request.face_annotations) == 1
+    assert request.face_annotations[0]["label"] == 1
+    assert request.face_annotations[0]["person_name"] == "Kelly"
+    assert "personal photo library" in request.messages[0]["content"]
+    assert "one natural sentence" in request.messages[0]["content"]
+    assert "Face 1 = Kelly" in request.messages[1]["content"]
+    assert "Do not mention boxes" in request.messages[1]["content"]
+
+
+def test_routing_prepares_recognized_faces_as_annotations(db):
+    orchestrator = _make_orchestrator(db)
+    annotation = {
+        "label": 1,
+        "person_id": "person-1",
+        "person_name": "Kelly",
+        "bounding_box_x1": 10,
+        "bounding_box_y1": 20,
+        "bounding_box_x2": 110,
+        "bounding_box_y2": 140,
+        "image_width": 1920,
+        "image_height": 1440,
+    }
+    request = PreparedRoutingAsset(
+        asset_id="asset-1",
+        immich_id="immich-1",
+        prompt_run_id="prompt-1",
+        messages=[],
+        face_annotations=(annotation,),
+    )
+    orchestrator.image_service.prepare_for_provider = MagicMock(
+        return_value={"data_url": "data:image/jpeg;base64,ZmFrZQ=="},
+    )
+    orchestrator.provider.classify_routing = MagicMock(return_value={
+        "disposition": "review",
+        "review_required": True,
+        "metadata": {"description": "Kelly relaxes by the window."},
+    })
+
+    orchestrator._classify_prepared_asset(request)
+
+    orchestrator.image_service.prepare_for_provider.assert_called_once_with(
+        "immich-1",
+        face_annotations=[annotation],
+    )
+
+
+def test_routing_retries_when_trusted_name_is_missing(db):
+    orchestrator = _make_orchestrator(db)
+    orchestrator.provider.classify_routing = MagicMock(side_effect=[
+        {
+            "disposition": "review",
+            "review_required": True,
+            "metadata": {"description": "Four people enjoy dinner together."},
+        },
+        {
+            "disposition": "review",
+            "review_required": True,
+            "metadata": {
+                "description": (
+                    "Kelly, Anne, Minh Ha, and Christoper enjoy dinner together."
+                ),
+            },
+        },
+    ])
+
+    retry_events = []
+    result = orchestrator._call_provider(
+        [{"role": "user", "content": "Describe the photo"}],
+        {"data_url": "data:image/jpeg;base64,ZmFrZQ==", "detail": "high"},
+        trusted_names=["Kelly", "Anne", "Minh Ha", "Christoper"],
+        asset_id="asset-123",
+        retry_events=retry_events,
+    )
+
+    assert "Minh Ha" in result["metadata"]["description"]
+    assert orchestrator.provider.classify_routing.call_count == 2
+    retry_messages = orchestrator.provider.classify_routing.call_args.args[0]
+    assert retry_messages[-2]["role"] == "assistant"
+    assert "omitted these trusted Immich names" in retry_messages[-1]["content"]
+    assert "Christoper" in retry_messages[-1]["content"]
+    assert retry_events == [
+        (
+            "Identity caption retry for asset asset-123: description omitted "
+            "4 trusted names"
+        ),
+        "Identity caption retry succeeded for asset asset-123",
+    ]
+
+
+def test_routing_saves_last_description_missing_name_after_retry(db):
+    orchestrator = _make_orchestrator(db)
+    generic = {
+        "disposition": "review",
+        "review_required": True,
+        "metadata": {"description": "Several people enjoy dinner together."},
+    }
+    orchestrator.provider.classify_routing = MagicMock(
+        side_effect=[generic, generic],
+    )
+
+    retry_events = []
+    result = orchestrator._call_provider(
+        [{"role": "user", "content": "Describe the photo"}],
+        {"data_url": "data:image/jpeg;base64,ZmFrZQ==", "detail": "high"},
+        trusted_names=["Kelly"],
+        asset_id="asset-123",
+        retry_events=retry_events,
+    )
+
+    assert result is generic
+    assert orchestrator.provider.classify_routing.call_count == 2
+    assert retry_events == [
+        (
+            "Identity caption retry for asset asset-123: description omitted "
+            "1 trusted name"
+        ),
+        (
+            "Identity caption retry incomplete for asset asset-123: saving "
+            "last response with 1 trusted name omitted"
+        ),
+    ]
+
+
 def test_process_asset_releases_transaction_during_external_calls(db):
     orchestrator = _make_orchestrator(db)
     asset = _make_asset(db, "asset-with-thumbnail")
@@ -507,7 +663,7 @@ def test_parallel_classification_respects_configured_concurrency(db):
         time.sleep(0.05)
         with lock:
             active -= 1
-        return {}, MagicMock()
+        return {}, MagicMock(), [f"Retry event for {_request.immich_id}"]
 
     orchestrator._classify_prepared_asset = classify
     orchestrator._save_prepared_result = MagicMock()
@@ -523,6 +679,12 @@ def test_parallel_classification_respects_configured_concurrency(db):
     assert stopped is False
     assert peak == 3
     assert orchestrator._save_prepared_result.call_count == 6
+    retry_logs = [
+        call.kwargs["log_line"]
+        for call in orchestrator.job_service.update_progress.call_args_list
+        if call.kwargs.get("log_line", "").startswith("Retry event for ")
+    ]
+    assert retry_logs == [f"Retry event for image-{index}" for index in range(6)]
 
 
 def test_plan_groups_items_by_destination(db):

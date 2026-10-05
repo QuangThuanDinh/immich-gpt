@@ -20,7 +20,11 @@ _PNG = base64.b64decode(
 
 
 class _FakeImmichClient:
+    def __init__(self):
+        self.thumbnail_calls = []
+
     def get_thumbnail(self, _asset_id, size="thumbnail"):
+        self.thumbnail_calls.append((_asset_id, size))
         return _PNG
 
 
@@ -28,17 +32,32 @@ class _FakeProvider:
     provider_name = "fake"
     model = "fake-model"
 
+    def __init__(self):
+        self.last_messages = None
+        self.last_image_payload = None
+
     def health_check(self):
         return True
 
     def classify_routing(self, _messages, _image_payload):
+        self.last_messages = _messages
+        self.last_image_payload = _image_payload
+        combined_text = " ".join(
+            str(message.get("content", ""))
+            for message in _messages
+        )
+        description = (
+            "Kelly reviews a scanned tax document."
+            if "Face 1 = Kelly" in combined_text
+            else "A scanned tax document."
+        )
         return {
             "disposition": "keep",
             "primary_path": "Documents",
             "primary_confidence": 0.98,
             "review_required": False,
             "metadata": {
-                "description": "A scanned tax document.",
+                "description": description,
                 "tags": ["Tax", "document"],
                 "location": None,
                 "caption": None,
@@ -131,6 +150,44 @@ def test_evaluate_scores_tag_and_destination_and_persists_latest(db):
     assert result.items[0].score == 1
     assert result.items[0].max_score == 1
     assert service.get_state().total_score == 1
+
+
+def test_evaluation_uses_recognized_face_annotations(db):
+    _add_asset(db)
+    asset = db.query(Asset).filter(Asset.immich_id == "immich-eval-1").one()
+    asset.faces_json = [{
+        "id": "face-1",
+        "bounding_box_x1": 0,
+        "bounding_box_y1": 0,
+        "bounding_box_x2": 1,
+        "bounding_box_y2": 1,
+        "image_width": 1,
+        "image_height": 1,
+        "source_type": "machine-learning",
+        "person_id": "person-1",
+        "person_name": "Kelly",
+    }]
+    db.commit()
+    provider = _FakeProvider()
+    immich = _FakeImmichClient()
+    service = RoutingEvaluationService(
+        db,
+        TEST_USER_ID,
+        provider=provider,
+        immich_client=immich,
+    )
+
+    service.evaluate([
+        RoutingEvaluationItemInput(
+            immich_id="immich-eval-1",
+            expected_tag="tax",
+        ),
+    ])
+
+    assert immich.thumbnail_calls == [("immich-eval-1", "preview")]
+    assert provider.last_image_payload["detail"] == "high"
+    assert provider.last_image_payload["annotated_faces"] == 1
+    assert "Face 1 = Kelly" in provider.last_messages[1]["content"]
 
 
 def test_get_state_repairs_stale_aggregate_score(db):
