@@ -10,10 +10,16 @@ import {
   MapPin,
   Star,
   Tag,
+  UserRound,
   X,
 } from "lucide-react";
-import { getAsset, getImmichSettings, getThumbnailUrl } from "../services/api";
-import type { Asset } from "../types";
+import {
+  getAsset,
+  getImmichSettings,
+  getPersonThumbnailUrl,
+  getThumbnailUrl,
+} from "../services/api";
+import type { Asset, AssetPerson } from "../types";
 
 function MetaRow({ icon, label, value }: {
   icon: React.ReactNode;
@@ -36,6 +42,35 @@ interface Props {
   assetId: string;
   initialAsset?: Asset;
   onClose: () => void;
+}
+
+function PersonCard({ assetId, person }: { assetId: string; person: AssetPerson }) {
+  const [imgError, setImgError] = React.useState(false);
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+      <div style={{
+        width: 42, height: 42, borderRadius: "50%", overflow: "hidden",
+        background: "#1e293b", border: "1px solid #334155", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        {imgError ? (
+          <UserRound size={18} color="#64748b" />
+        ) : (
+          <img
+            src={getPersonThumbnailUrl(assetId, person.id)}
+            alt={person.name}
+            loading="lazy"
+            onError={() => setImgError(true)}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        )}
+      </div>
+      <span style={{ color: "#e2e8f0", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" }}>
+        {person.name}
+      </span>
+    </div>
+  );
 }
 
 export default function AssetDetailPanel({ assetId, initialAsset, onClose }: Props) {
@@ -180,6 +215,19 @@ export default function AssetDetailPanel({ assetId, initialAsset, onClose }: Pro
                   )
                 }
               />
+              {(asset.people ?? []).length > 0 && (
+                <MetaRow
+                  icon={<UserRound size={13} />}
+                  label="People"
+                  value={
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginTop: 4 }}>
+                      {(asset.people ?? []).map((person) => (
+                        <PersonCard key={person.id} assetId={asset.id} person={person} />
+                      ))}
+                    </div>
+                  }
+                />
+              )}
               {(asset.album_ids ?? []).length > 0 && (
                 <MetaRow icon={<Tag size={13} />} label="Albums" value={`${asset.album_ids!.length} album${asset.album_ids!.length !== 1 ? "s" : ""}`} />
               )}

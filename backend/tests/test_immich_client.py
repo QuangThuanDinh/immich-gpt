@@ -67,6 +67,36 @@ def test_get_thumbnail_raises_on_404():
             client.get_thumbnail("missing-asset")
 
 
+def test_get_person_thumbnail_returns_bytes():
+    client = ImmichClient("http://immich.local", "key")
+    fake_bytes = b"\xff\xd8\xff\xe0face"
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.get.return_value = make_mock_response(200, content=fake_bytes)
+
+    with patch.object(client, "_client", return_value=mock_http):
+        result = client.get_person_thumbnail("person-123")
+
+    assert result == fake_bytes
+    mock_http.get.assert_called_once_with(
+        "/api/people/person-123/thumbnail",
+        headers={"x-api-key": "key", "Accept": "image/*"},
+    )
+
+
+def test_get_person_thumbnail_raises_on_error():
+    client = ImmichClient("http://immich.local", "key")
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.get.return_value = make_mock_response(404, {"error": "Not found"})
+
+    with patch.object(client, "_client", return_value=mock_http):
+        with pytest.raises(ImmichError, match="Person thumbnail unavailable"):
+            client.get_person_thumbnail("missing-person")
+
+
 def test_api_key_sent_in_header():
     """Verify credentials are sent in headers, not in URL."""
     client = ImmichClient("http://immich.local", "my-secret-key")

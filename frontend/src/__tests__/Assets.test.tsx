@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -9,8 +9,11 @@ vi.mock("../services/api", () => ({
   getAssets: vi.fn(),
   getAsset: vi.fn(),
   getAssetCount: vi.fn(),
+  getImmichSettings: vi.fn().mockResolvedValue({ immich_url: "http://immich.local" }),
   getThumbnailUrl: (assetId: string, size = "thumbnail") =>
     `/api/thumbnails/${assetId}?size=${size}`,
+  getPersonThumbnailUrl: (assetId: string, personId: string) =>
+    `/api/thumbnails/${assetId}/people/${personId}`,
 }));
 
 import { getAssets, getAssetCount } from "../services/api";
@@ -70,5 +73,38 @@ describe("Assets page", () => {
       gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
       gap: "12px",
     });
+  });
+
+  it("shows synced tags and people in the asset side pane", async () => {
+    vi.mocked(getAssets).mockResolvedValue([{
+      id: "asset-1",
+      immich_id: "immich-1",
+      original_filename: "photo.jpg",
+      asset_type: "IMAGE",
+      tags: ["ramen", "dining"],
+      people: [{
+        id: "person-1",
+        name: "Kelly",
+        is_hidden: false,
+        is_favorite: false,
+      }],
+      is_favorite: false,
+      is_archived: false,
+      is_external_library: false,
+      created_at: "2026-05-05T10:00:00Z",
+    }]);
+    renderPage();
+
+    fireEvent.click(await screen.findByText("photo.jpg"));
+
+    expect(await screen.findByText("Current tags")).toBeInTheDocument();
+    expect(screen.getByText("ramen")).toBeInTheDocument();
+    expect(screen.getByText("dining")).toBeInTheDocument();
+    expect(screen.getByText("People")).toBeInTheDocument();
+    expect(screen.getByText("Kelly")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Kelly" })).toHaveAttribute(
+      "src",
+      "/api/thumbnails/asset-1/people/person-1"
+    );
   });
 });

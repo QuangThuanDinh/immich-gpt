@@ -5,10 +5,12 @@ from tests.conftest import TEST_USER_ID
 
 
 class _PagedImmich:
-    def __init__(self, pages, trashed_pages=None):
+    def __init__(self, pages, trashed_pages=None, details=None):
         self.pages = pages
         self.trashed_pages = trashed_pages or {}
+        self.details = details or {}
         self.trashed_calls = []
+        self.detail_calls = []
 
     def list_assets(self, page=1, page_size=100, **kwargs):
         return self.pages.get(page, [])
@@ -16,6 +18,19 @@ class _PagedImmich:
     def list_trashed_assets(self, page=1, page_size=100):
         self.trashed_calls.append((page, page_size))
         return self.trashed_pages.get(page, [])
+
+    def get_asset(self, asset_id):
+        self.detail_calls.append(asset_id)
+        if asset_id in self.details:
+            detail = self.details[asset_id]
+            if isinstance(detail, Exception):
+                raise detail
+            return detail
+        for assets in self.pages.values():
+            for asset in assets:
+                if asset.get("id") == asset_id:
+                    return asset
+        raise RuntimeError(f"Unknown asset {asset_id}")
 
     def is_external_library_asset(self, raw):
         return False
@@ -31,6 +46,63 @@ def _raw_asset(asset_id, asset_type, **extra):
         ),
         **extra,
     }
+
+
+def test_sync_hydrates_tags_and_people_from_asset_detail(db):
+    summary = _raw_asset(
+        "photo",
+        "IMAGE",
+        albums=[{"id": "album-1"}],
+    )
+    detail = _raw_asset(
+        "photo",
+        "IMAGE",
+        tags=[{"id": "tag-1", "name": "ramen"}],
+        people=[{
+            "id": "person-1",
+            "name": "Kelly",
+            "thumbnailPath": "/private/upstream/path.jpg",
+            "isHidden": False,
+            "isFavorite": True,
+        }],
+    )
+    immich = _PagedImmich({1: [summary]}, details={"photo": detail})
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(page_size=10)
+
+    asset = db.query(Asset).filter(Asset.immich_id == "photo").one()
+    assert result["errors"] == 0
+    assert immich.detail_calls == ["photo"]
+    assert asset.tags_json == ["ramen"]
+    assert asset.people_json == [{
+        "id": "person-1",
+        "name": "Kelly",
+        "is_hidden": False,
+        "is_favorite": True,
+    }]
+    assert asset.album_ids_json == ["album-1"]
+    assert asset.raw_metadata_json["tags"][0]["name"] == "ramen"
+    assert "thumbnailPath" in asset.raw_metadata_json["people"][0]
+
+
+def test_sync_reports_asset_detail_failure_without_storing_summary(db):
+    immich = _PagedImmich(
+        {1: [_raw_asset("photo", "IMAGE")]},
+        details={"photo": RuntimeError("detail unavailable")},
+    )
+    log_lines = []
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(
+        page_size=10,
+        job_progress_callback=log_lines.append,
+    )
+
+    assert result["errors"] == 1
+    assert result["synced"] == 0
+    assert db.query(Asset).filter(Asset.immich_id == "photo").count() == 0
+    assert "Error syncing asset photo: detail unavailable" in log_lines
 
 
 def test_sync_filters_live_photo_motion_asset_after_all_pages(db):
@@ -302,6 +374,12 @@ def test_multiple_albums_reconcile_once_after_all_albums(db):
         def list_trashed_assets(self, page=1, page_size=100):
             return []
 
+        def get_asset(self, asset_id):
+            return {
+                "still": _raw_asset("still", "IMAGE", livePhotoVideoId="motion"),
+                "motion": _raw_asset("motion", "VIDEO"),
+            }[asset_id]
+
         def is_external_library_asset(self, raw):
             return False
 
@@ -336,6 +414,9 @@ def test_album_sync_filters_motion_referenced_by_trashed_still(db):
                     livePhotoVideoId="motion",
                 )
             ]
+
+        def get_asset(self, asset_id):
+            return _raw_asset(asset_id, "VIDEO")
 
         def is_external_library_asset(self, raw):
             return False

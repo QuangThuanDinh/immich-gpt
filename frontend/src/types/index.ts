@@ -11,12 +11,20 @@ export interface Asset {
   camera_model?: string;
   description?: string;
   tags?: string[];
+  people?: AssetPerson[];
   album_ids?: string[];
   is_favorite: boolean;
   is_archived: boolean;
   is_external_library: boolean;
   synced_at?: string;
   created_at: string;
+}
+
+export interface AssetPerson {
+  id: string;
+  name: string;
+  is_hidden: boolean;
+  is_favorite: boolean;
 }
 
 export interface JobRun {

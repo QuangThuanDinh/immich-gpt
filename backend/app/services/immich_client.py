@@ -214,6 +214,20 @@ class ImmichClient:
                 )
             return r.content
 
+    def get_person_thumbnail(self, person_id: str) -> bytes:
+        """Fetch the representative face thumbnail for an Immich person."""
+        with self._client_context() as client:
+            r = client.get(
+                f"/api/people/{person_id}/thumbnail",
+                headers={**self._headers, "Accept": "image/*"},
+            )
+            if r.status_code != 200:
+                raise ImmichError(
+                    f"Person thumbnail unavailable for {person_id}",
+                    r.status_code,
+                )
+            return r.content
+
     def list_albums(self) -> List[Dict[str, Any]]:
         with self._client_context() as client:
             r = client.get("/api/albums")

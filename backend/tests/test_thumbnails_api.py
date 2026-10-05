@@ -132,3 +132,67 @@ def test_get_thumbnail_by_immich_id_direct_error(client, db):
         r = client.get(f"/api/thumbnails/immich/{asset.immich_id}")
 
     assert r.status_code == 502
+
+
+def test_get_person_thumbnail_for_asset(client, db):
+    asset = _make_asset(db)
+    asset.people_json = [{
+        "id": "person-1",
+        "name": "Kelly",
+        "is_hidden": False,
+        "is_favorite": False,
+    }]
+    db.commit()
+    mock_client = MagicMock()
+    mock_client.get_person_thumbnail.return_value = FAKE_IMAGE_BYTES
+
+    with patch("app.routers.thumbnails._get_user_immich_client", return_value=mock_client):
+        r = client.get(f"/api/thumbnails/{asset.id}/people/person-1")
+
+    assert r.status_code == 200
+    assert r.content == FAKE_IMAGE_BYTES
+    assert "private" in r.headers["cache-control"]
+    mock_client.get_person_thumbnail.assert_called_once_with("person-1")
+
+
+def test_get_person_thumbnail_rejects_person_not_on_asset(client, db):
+    asset = _make_asset(db)
+    asset.people_json = []
+    db.commit()
+    mock_client = MagicMock()
+
+    with patch("app.routers.thumbnails._get_user_immich_client", return_value=mock_client):
+        r = client.get(f"/api/thumbnails/{asset.id}/people/person-1")
+
+    assert r.status_code == 404
+    mock_client.get_person_thumbnail.assert_not_called()
+
+
+def test_get_person_thumbnail_requires_owned_asset(client, db):
+    asset = _make_asset(db, user_id="other-user-id")
+    asset.people_json = [{"id": "person-1", "name": "Kelly"}]
+    db.commit()
+    mock_client = MagicMock()
+
+    with patch("app.routers.thumbnails._get_user_immich_client", return_value=mock_client):
+        r = client.get(f"/api/thumbnails/{asset.id}/people/person-1")
+
+    assert r.status_code == 404
+    mock_client.get_person_thumbnail.assert_not_called()
+
+
+def test_get_person_thumbnail_immich_error(client, db):
+    asset = _make_asset(db)
+    asset.people_json = [{"id": "person-1", "name": "Kelly"}]
+    db.commit()
+    mock_client = MagicMock()
+    mock_client.get_person_thumbnail.side_effect = ImmichError(
+        "upstream unavailable",
+        503,
+    )
+
+    with patch("app.routers.thumbnails._get_user_immich_client", return_value=mock_client):
+        r = client.get(f"/api/thumbnails/{asset.id}/people/person-1")
+
+    assert r.status_code == 502
+    assert "upstream unavailable" in r.json()["detail"]

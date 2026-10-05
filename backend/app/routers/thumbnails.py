@@ -30,6 +30,43 @@ def _get_user_immich_client(db: Session, user_id: str) -> ImmichClient:
     return ImmichClient(url, api_key)
 
 
+@router.get("/{asset_id}/people/{person_id}")
+def get_person_thumbnail(
+    asset_id: str,
+    person_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    """Proxy a face thumbnail only when the person belongs to the owned asset."""
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.user_id == current_user.id,
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    people = asset.people_json if isinstance(asset.people_json, list) else []
+    if not any(
+        isinstance(person, dict) and person.get("id") == person_id
+        for person in people
+    ):
+        raise HTTPException(status_code=404, detail="Person not found for asset")
+
+    client = _get_user_immich_client(db, current_user.id)
+    try:
+        image_bytes = client.get_person_thumbnail(person_id)
+        return Response(
+            content=image_bytes,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except ImmichError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not fetch person thumbnail from Immich: {e}",
+        )
+
+
 @router.get("/{asset_id}")
 def get_thumbnail(
     asset_id: str,

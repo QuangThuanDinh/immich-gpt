@@ -3,6 +3,13 @@ from typing import Optional, List
 from datetime import datetime
 
 
+class AssetPersonOut(BaseModel):
+    id: str
+    name: str
+    is_hidden: bool = False
+    is_favorite: bool = False
+
+
 class AssetOut(BaseModel):
     id: str
     immich_id: str
@@ -16,6 +23,7 @@ class AssetOut(BaseModel):
     camera_model: Optional[str]
     description: Optional[str]
     tags: Optional[List[str]]
+    people: Optional[List[AssetPersonOut]]
     album_ids: Optional[List[str]]
     is_favorite: bool
     is_archived: bool

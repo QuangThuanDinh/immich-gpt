@@ -348,3 +348,6 @@ export const applyRoutingPlan = (
 // --- Thumbnail URL helper ---
 export const getThumbnailUrl = (assetId: string, size = "thumbnail") =>
   `/api/thumbnails/${assetId}?size=${size}`;
+
+export const getPersonThumbnailUrl = (assetId: string, personId: string) =>
+  `/api/thumbnails/${encodeURIComponent(assetId)}/people/${encodeURIComponent(personId)}`;

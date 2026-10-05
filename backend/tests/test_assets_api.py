@@ -148,6 +148,12 @@ def test_get_asset_optional_fields(client, db):
     a.camera_make = "Canon"
     a.description = "A test photo"
     a.tags_json = ["nature", "landscape"]
+    a.people_json = [{
+        "id": "person-1",
+        "name": "Kelly",
+        "is_hidden": False,
+        "is_favorite": True,
+    }]
     db.commit()
 
     data = client.get(f"/api/assets/{a.id}").json()
@@ -156,3 +162,9 @@ def test_get_asset_optional_fields(client, db):
     assert data["camera_make"] == "Canon"
     assert data["description"] == "A test photo"
     assert data["tags"] == ["nature", "landscape"]
+    assert data["people"] == [{
+        "id": "person-1",
+        "name": "Kelly",
+        "is_hidden": False,
+        "is_favorite": True,
+    }]

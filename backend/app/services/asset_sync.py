@@ -2,6 +2,7 @@
 Asset sync service: pulls assets from Immich and stores them locally.
 """
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable, Set, Tuple
 from sqlalchemy.orm import Session
@@ -244,6 +245,7 @@ class AssetSyncService:
             page += 1
 
     _COMMIT_BATCH_SIZE = 100
+    _DETAIL_FETCH_CONCURRENCY = 8
 
     def _sync_paged(
         self,
@@ -280,9 +282,18 @@ class AssetSyncService:
                 completed = True
                 break
 
-            for raw in raw_assets:
+            workers = min(self._DETAIL_FETCH_CONCURRENCY, len(raw_assets))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                detail_futures = [
+                    executor.submit(self.immich.get_asset, raw["id"])
+                    for raw in raw_assets
+                ]
+
+            for raw, detail_future in zip(raw_assets, detail_futures):
                 try:
-                    c, u, asset_id = self._upsert_asset(raw, synced_at)
+                    detailed = detail_future.result()
+                    hydrated = {**raw, **detailed}
+                    c, u, asset_id = self._upsert_asset(hydrated, synced_at)
                     created += c
                     updated += u
                     if asset_id:
@@ -291,8 +302,13 @@ class AssetSyncService:
                         elif u:
                             updated_ids.add(asset_id)
                     pending += 1
-                except Exception:
+                except Exception as exc:
                     errors += 1
+                    if job_progress_callback:
+                        raw_id = raw.get("id", "unknown")
+                        job_progress_callback(
+                            f"Error syncing asset {raw_id}: {exc}"
+                        )
 
                 if pending >= self._COMMIT_BATCH_SIZE:
                     self.db.commit()
@@ -361,8 +377,18 @@ class AssetSyncService:
             q = q.filter(Asset.user_id == self.user_id)
         existing = q.first()
         exif = raw.get("exifInfo") or {}
-        people = raw.get("people") or []
         tags = [t.get("name") for t in (raw.get("tags") or []) if t.get("name")]
+        people = []
+        for person in raw.get("people") or []:
+            person_id = person.get("id")
+            if not person_id:
+                continue
+            people.append({
+                "id": person_id,
+                "name": person.get("name") or "Unnamed person",
+                "is_hidden": bool(person.get("isHidden", False)),
+                "is_favorite": bool(person.get("isFavorite", False)),
+            })
 
         data = {
             "immich_id": immich_id,
@@ -383,6 +409,7 @@ class AssetSyncService:
             "camera_model": exif.get("model"),
             "description": raw.get("exifInfo", {}).get("description") if raw.get("exifInfo") else None,
             "tags_json": tags,
+            "people_json": people,
             "album_ids_json": [a.get("id") for a in (raw.get("albums") or []) if a.get("id")],
             "raw_metadata_json": raw,
             "synced_at": synced_at,
