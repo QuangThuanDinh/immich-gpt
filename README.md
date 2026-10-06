@@ -4,9 +4,26 @@
   <img src="frontend/public/logo.png" alt="immich-gpt logo" width="320" />
 </p>
 
-**AI metadata enrichment and album organization for Immich.**
+**AI metadata enrichment, face-aware captions, and review-first photo routing for Immich.**
 
 immich-gpt is a self-hosted web app that connects to your Immich library, pulls thumbnails and metadata, asks an AI model for descriptions, tags, and routing destinations, and lets you approve every write-back before it reaches Immich.
+
+## Enhancements in this fork
+
+Compared with the original project, this fork includes:
+
+- [x] Custom API base URLs for OpenAI, Azure OpenAI, and OpenRouter
+- [x] Responsive, mobile-friendly pages and review workflows
+- [x] A persistent Evaluation workspace for testing tags and routing destinations with normalized scoring
+- [x] Portable JSON import and export for Evaluation settings and complete Routing Tree configurations
+- [x] Configurable per-user parallel AI processing for Evaluation and Routing jobs
+- [x] Improved routing-plan review with grouped and per-item actions plus immediate approved write-back
+- [x] Authoritative Immich tag, people, and face-region synchronization with secure person thumbnails
+- [x] Face-aware natural captions that use trusted Immich identities without asking the AI to recognize people
+- [x] Identity-caption validation with one corrective retry and privacy-conscious job logs
+- [x] Incremental sync for new, changed, failed, or incomplete assets plus an explicit Full Sync option
+- [x] New-only Sync + Route behavior that avoids reprocessing previously routed assets
+- [x] Pre-hydration Live Photo companion filtering to avoid repeated detail and face requests
 
 ## Key highlights
 
@@ -22,6 +39,7 @@ immich-gpt is a self-hosted web app that connects to your Immich library, pulls 
 
 ## Table of contents
 
+- [Enhancements in this fork](#enhancements-in-this-fork)
 - [What immich-gpt does](#what-immich-gpt-does)
 - [Documentation map](#documentation-map)
 - [Quick start](#quick-start)
@@ -32,7 +50,6 @@ immich-gpt is a self-hosted web app that connects to your Immich library, pulls 
 - [API and health endpoints](#api-and-health-endpoints)
 - [Architecture](#architecture)
 - [Development](#development)
-- [Enhancements in this fork](#enhancements-in-this-fork)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -347,25 +364,16 @@ That build writes static assets into `backend/static` so FastAPI can serve the S
 
 See [`docs/development.md`](docs/development.md) for local run commands, migrations, and contributor workflow details.
 
-## Enhancements in this fork
-
-Compared with the original project, this fork includes:
-
-- [x] Custom API base URLs for OpenAI, Azure OpenAI, and OpenRouter
-- [x] Responsive, mobile-friendly pages and review workflows
-- [x] A persistent Evaluation workspace for testing tags and routing destinations with normalized scoring
-- [x] Portable JSON import and export for Evaluation settings and complete Routing Tree configurations
-- [x] Configurable per-user parallel AI processing for Evaluation and Routing jobs
-- [x] Improved routing-plan review with grouped and per-item actions plus immediate approved write-back
-- [x] Live Photo motion-asset filtering to avoid processing companion video files as separate photos
-
 ## Roadmap
 
-- [ ] Asset detail view
-- [ ] Video thumbnail support
+- [x] Asset detail view with synced tags and recognized people
+- [x] Immich face and people metadata, including face bounding boxes
+- [x] Video thumbnail display through the authenticated Immich thumbnail proxy
 - [ ] Duplicate and junk heuristic pre-filter
-- [ ] Immich face and people metadata
+- [ ] Automated Evaluation suites and regression thresholds
 - [ ] SMTP or email delivery for password resets
+
+The roadmap is directional and may change as Immich APIs and provider capabilities evolve.
 
 ## License
 
