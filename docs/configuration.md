@@ -56,7 +56,7 @@ These variables are primarily used by `.env.example` and `docker-compose.yml`.
 | `DATA_DIR` | `/mnt/user/appdata/immich-gpt` | Host path mounted to `/data` for the SQLite database, settings, job history, routing data, and generated secret |
 | `LOG_DIR` | unset | Optional host path mounted to `/logs` for persistent rotating logs |
 | `APP_PORT` | `8000` | Host port mapped to container port `8000` |
-| `IMMICH_GPT_IMAGE` | `ghcr.io/quangthuandinh/immich-gpt:0.6.22` | Image tag used by `docker-compose.yml` |
+| `IMMICH_GPT_IMAGE` | `ghcr.io/quangthuandinh/immich-gpt:0.6.23` | Image tag used by `docker-compose.yml` |
 
 ## Core runtime variables
 
