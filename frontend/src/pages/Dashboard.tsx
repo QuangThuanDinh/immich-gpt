@@ -13,6 +13,7 @@ import JobProgressBar from "../components/JobProgressBar";
 import JobDetail from "../components/JobDetail";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import RunRoutingButton from "../components/RunRoutingButton";
+import RunSyncButton from "../components/RunSyncButton";
 import { usePageVisible } from "../hooks/usePageVisible";
 import {
   Database, Play, RefreshCw, AlertTriangle, CheckCircle,
@@ -46,7 +47,12 @@ type WorkflowMode = "sync" | "sync_route" | "route";
 function WorkflowPanel({
   onSync, onRoute, isLoading, disabled,
 }: {
-  onSync: (scope: SyncScope, albumIds: string[] | undefined, runRoutingAfter: boolean) => void;
+  onSync: (
+    scope: SyncScope,
+    albumIds: string[] | undefined,
+    runRoutingAfter: boolean,
+    fullSync: boolean,
+  ) => void;
   onRoute: (force: boolean) => void;
   isLoading: boolean;
   disabled: boolean;
@@ -78,13 +84,13 @@ function WorkflowPanel({
     {
       value: "sync",
       label: "Sync Only",
-      desc: "Pull new assets from Immich into immich-gpt. No routing.",
+      desc: "Pull new or changed assets from Immich. Unchanged assets are skipped.",
       icon: <RefreshCw size={14} />,
     },
     {
       value: "sync_route",
       label: "Sync + Route",
-      desc: "Pull new assets, then immediately classify them through your routing tree.",
+      desc: "Pull new or changed assets, then route only newly added photos.",
       icon: <Layers size={14} />,
     },
     {
@@ -95,7 +101,7 @@ function WorkflowPanel({
     },
   ];
 
-  function handleRun() {
+  function handleRun(fullSync = false) {
     if (workflowMode === "route") {
       onRoute(false);
     } else {
@@ -103,6 +109,7 @@ function WorkflowPanel({
         scope,
         scope === "albums" ? Array.from(selectedAlbumIds) : undefined,
         workflowMode === "sync_route",
+        fullSync,
       );
     }
   }
@@ -205,19 +212,22 @@ function WorkflowPanel({
           onRun={onRoute}
           primary
         />
+      ) : workflowMode === "sync" ? (
+        <RunSyncButton
+          label={isLoading ? "Starting…" : "Start Sync"}
+          pending={!canRun}
+          onRun={handleRun}
+        />
       ) : (
-        <button
-          onClick={handleRun}
-          disabled={!canRun}
-          className={[styles.scopeBtn, canRun ? styles.scopeBtnActive : styles.scopeBtnInactive].join(" ")}
-          style={{ padding: "9px 20px", marginTop: 4 }}
-        >
-          {workflowMode === "sync" && <RefreshCw size={14} />}
-          {workflowMode === "sync_route" && <Layers size={14} />}
-          {isLoading ? "Starting…" : (
-            workflowMode === "sync" ? "Start Sync" : "Sync + Route"
-          )}
-        </button>
+          <button
+            onClick={() => handleRun(false)}
+            disabled={!canRun}
+            className={[styles.scopeBtn, canRun ? styles.scopeBtnActive : styles.scopeBtnInactive].join(" ")}
+            style={{ padding: "9px 20px" }}
+          >
+            <Layers size={14} />
+            {isLoading ? "Starting…" : "Sync + Route"}
+          </button>
       )}
     </div>
   );
@@ -276,11 +286,17 @@ export default function Dashboard() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: (params: { scope: SyncScope; album_ids?: string[]; runRoutingAfter: boolean }) =>
+    mutationFn: (params: {
+      scope: SyncScope;
+      album_ids?: string[];
+      runRoutingAfter: boolean;
+      fullSync: boolean;
+    }) =>
       startSyncJob({
         scope: params.scope,
         album_ids: params.album_ids,
         run_routing_after: params.runRoutingAfter,
+        full_sync: params.fullSync,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -347,8 +363,13 @@ export default function Dashboard() {
       </div>
 
       <WorkflowPanel
-        onSync={(scope, albumIds, runRoutingAfter) =>
-          syncMutation.mutate({ scope, album_ids: albumIds, runRoutingAfter })
+        onSync={(scope, albumIds, runRoutingAfter, fullSync) =>
+          syncMutation.mutate({
+            scope,
+            album_ids: albumIds,
+            runRoutingAfter,
+            fullSync,
+          })
         }
         onRoute={(force) => routeMutation.mutate(force)}
         isLoading={syncMutation.isPending || routeMutation.isPending}

@@ -183,6 +183,7 @@ def start_sync_job(
             "scope": req.scope,
             "album_ids": req.album_ids,
             "run_routing_after": req.run_routing_after,
+            "full_sync": req.full_sync,
         },
         user_id=current_user.id,
     )
@@ -194,6 +195,7 @@ def start_sync_job(
         req.album_ids,
         current_user.id,
         req.run_routing_after,
+        req.full_sync,
     )
 
     return JobStartResponse(job_id=job.id, status="queued", message="Sync job started")
@@ -285,6 +287,7 @@ def _resume_job_task(job_id: str) -> None:
                 params.get("album_ids"),
                 user_id,
                 params.get("run_routing_after", False),
+                params.get("full_sync", False),
             )
         elif j.job_type == "routing_classification":
             from ..workers.tasks import run_routing_classification

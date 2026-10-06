@@ -86,6 +86,7 @@ export interface SyncJobRequest {
   scope: SyncScope;
   album_ids?: string[];
   run_routing_after?: boolean;
+  full_sync?: boolean;
 }
 
 export interface ImmichAlbum {

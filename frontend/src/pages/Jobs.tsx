@@ -9,7 +9,8 @@ import JobProgressBar from "../components/JobProgressBar";
 import JobDetail from "../components/JobDetail";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import RunRoutingButton from "../components/RunRoutingButton";
-import { RefreshCw, XCircle, ChevronDown, ChevronUp, Pause, RotateCcw, Trash2 } from "lucide-react";
+import RunSyncButton from "../components/RunSyncButton";
+import { XCircle, ChevronDown, ChevronUp, Pause, RotateCcw, Trash2 } from "lucide-react";
 import styles from "./Jobs.module.css";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -35,7 +36,10 @@ export default function Jobs() {
   const hasActiveJob = jobs.some((job) => ACTIVE.has(job.status) || job.status === "paused");
 
   const syncMut = useMutation({
-    mutationFn: () => startSyncJob({ scope: "all" }),
+    mutationFn: (fullSync: boolean) => startSyncJob({
+      scope: "all",
+      full_sync: fullSync,
+    }),
     onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["jobs"] }); setExpandedJobId(d.job_id); },
   });
 
@@ -63,9 +67,11 @@ export default function Jobs() {
           <p className={styles.subtitle}>Background sync and routing classification jobs</p>
         </div>
         <div className={styles.actions}>
-          <button onClick={() => syncMut.mutate()} disabled={syncMut.isPending || hasActiveJob} className={[styles.btn, styles.btnBlue].join(" ")}>
-            <RefreshCw size={14} /> Sync All
-          </button>
+          <RunSyncButton
+            label="Start Sync"
+            pending={syncMut.isPending || hasActiveJob}
+            onRun={(fullSync) => syncMut.mutate(fullSync)}
+          />
           <RunRoutingButton
             label="Run Routing"
             pending={routeMut.isPending || hasActiveJob}

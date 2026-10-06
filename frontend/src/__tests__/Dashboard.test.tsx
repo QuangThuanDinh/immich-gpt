@@ -71,9 +71,27 @@ describe("Dashboard workflow", () => {
         scope: "all",
         album_ids: undefined,
         run_routing_after: true,
+        full_sync: false,
       });
     });
     expect(mocks.startRoutingClassify).not.toHaveBeenCalled();
+  });
+
+  it("can explicitly start a full sync", async () => {
+    renderDashboard();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sync Only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Sync options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Full Sync/i }));
+
+    await waitFor(() => {
+      expect(mocks.startSyncJob).toHaveBeenCalledWith({
+        scope: "all",
+        album_ids: undefined,
+        run_routing_after: false,
+        full_sync: true,
+      });
+    });
   });
 
   it("can reprocess all assets from the routing workflow", async () => {

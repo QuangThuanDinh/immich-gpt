@@ -39,14 +39,26 @@ class AssetSyncService:
         job_progress_callback=None,
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+        full_sync: bool = False,
+    ) -> Dict[str, Any]:
         """Sync all assets from Immich."""
+        excluded_motion_ids, trash_lookup_completed, preparation_errors = (
+            self._prepare_motion_exclusions(
+                page_size,
+                should_stop,
+                job_progress_callback,
+            )
+        )
         result, completed, created_ids, updated_ids = self._sync_paged(
             fetch_fn=lambda page: self.immich.list_assets(page=page, page_size=page_size),
             job_progress_callback=job_progress_callback,
             page_size=page_size,
             should_stop=should_stop,
+            full_sync=full_sync,
+            excluded_motion_ids=excluded_motion_ids,
+            filter_motion_assets=trash_lookup_completed,
         )
+        result["errors"] += preparation_errors
         return self._finish_sync(
             result,
             completed,
@@ -55,6 +67,8 @@ class AssetSyncService:
             job_progress_callback,
             page_size,
             should_stop,
+            excluded_motion_ids,
+            trash_lookup_completed,
         )
 
     def sync_favorites(
@@ -62,8 +76,16 @@ class AssetSyncService:
         job_progress_callback=None,
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+        full_sync: bool = False,
+    ) -> Dict[str, Any]:
         """Sync only favorited assets from Immich."""
+        excluded_motion_ids, trash_lookup_completed, preparation_errors = (
+            self._prepare_motion_exclusions(
+                page_size,
+                should_stop,
+                job_progress_callback,
+            )
+        )
         result, completed, created_ids, updated_ids = self._sync_paged(
             fetch_fn=lambda page: self.immich.list_assets(
                 page=page, page_size=page_size, is_favorite=True
@@ -71,7 +93,11 @@ class AssetSyncService:
             job_progress_callback=job_progress_callback,
             page_size=page_size,
             should_stop=should_stop,
+            full_sync=full_sync,
+            excluded_motion_ids=excluded_motion_ids,
+            filter_motion_assets=trash_lookup_completed,
         )
+        result["errors"] += preparation_errors
         return self._finish_sync(
             result,
             completed,
@@ -80,6 +106,8 @@ class AssetSyncService:
             job_progress_callback,
             page_size,
             should_stop,
+            excluded_motion_ids,
+            trash_lookup_completed,
         )
 
     def sync_album(
@@ -88,8 +116,16 @@ class AssetSyncService:
         job_progress_callback=None,
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+        full_sync: bool = False,
+    ) -> Dict[str, Any]:
         """Sync assets from a specific album."""
+        excluded_motion_ids, trash_lookup_completed, preparation_errors = (
+            self._prepare_motion_exclusions(
+                page_size,
+                should_stop,
+                job_progress_callback,
+            )
+        )
         result, completed, created_ids, updated_ids = self._sync_paged(
             fetch_fn=lambda page: self.immich.list_album_assets(
                 album_id=album_id, page=page, page_size=page_size
@@ -97,7 +133,11 @@ class AssetSyncService:
             job_progress_callback=job_progress_callback,
             page_size=page_size,
             should_stop=should_stop,
+            full_sync=full_sync,
+            excluded_motion_ids=excluded_motion_ids,
+            filter_motion_assets=trash_lookup_completed,
         )
+        result["errors"] += preparation_errors
         return self._finish_sync(
             result,
             completed,
@@ -106,6 +146,8 @@ class AssetSyncService:
             job_progress_callback,
             page_size,
             should_stop,
+            excluded_motion_ids,
+            trash_lookup_completed,
         )
 
     def sync_albums(
@@ -114,12 +156,22 @@ class AssetSyncService:
         job_progress_callback=None,
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+        full_sync: bool = False,
+    ) -> Dict[str, Any]:
         """Sync assets from multiple albums."""
-        total_created = total_updated = total_errors = 0
+        total_created = total_updated = total_unchanged = total_errors = 0
+        total_skipped_motion = 0
         created_ids: Set[str] = set()
         updated_ids: Set[str] = set()
         completed = True
+        excluded_motion_ids, trash_lookup_completed, preparation_errors = (
+            self._prepare_motion_exclusions(
+                page_size,
+                should_stop,
+                job_progress_callback,
+            )
+        )
+        total_errors += preparation_errors
         for album_id in album_ids:
             if should_stop and should_stop():
                 if job_progress_callback:
@@ -140,11 +192,16 @@ class AssetSyncService:
                     job_progress_callback=job_progress_callback,
                     page_size=page_size,
                     should_stop=should_stop,
+                    full_sync=full_sync,
+                    excluded_motion_ids=excluded_motion_ids,
+                    filter_motion_assets=trash_lookup_completed,
                 )
             )
             total_created += result["created"]
             total_updated += result["updated"]
             total_errors += result["errors"]
+            total_unchanged += result["unchanged"]
+            total_skipped_motion += result["skipped_motion"]
             created_ids.update(album_created_ids)
             updated_ids.update(album_updated_ids)
             if not album_completed:
@@ -155,7 +212,9 @@ class AssetSyncService:
             {
                 "created": total_created,
                 "updated": total_updated,
+                "unchanged": total_unchanged,
                 "errors": total_errors,
+                "skipped_motion": total_skipped_motion,
             },
             completed,
             created_ids,
@@ -163,50 +222,76 @@ class AssetSyncService:
             job_progress_callback,
             page_size,
             should_stop,
+            excluded_motion_ids,
+            trash_lookup_completed,
         )
 
     def _finish_sync(
         self,
-        result: Dict[str, int],
+        result: Dict[str, Any],
         completed: bool,
         created_ids: Set[str],
         updated_ids: Set[str],
         job_progress_callback=None,
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
-    ) -> Dict[str, int]:
+        excluded_motion_ids: Optional[Set[str]] = None,
+        trash_lookup_completed: bool = False,
+    ) -> Dict[str, Any]:
         filtered_ids: Set[str] = set()
-        if completed:
-            try:
-                trashed_motion_ids, trash_lookup_completed = (
-                    self._collect_trashed_live_photo_motion_ids(
-                        page_size=page_size,
-                        should_stop=should_stop,
-                        job_progress_callback=job_progress_callback,
-                    )
+        if completed and trash_lookup_completed:
+            filtered_ids = self._remove_live_photo_motion_assets(
+                excluded_motion_ids
+            )
+            if filtered_ids and job_progress_callback:
+                job_progress_callback(
+                    f"Filtered {len(filtered_ids)} linked Live Photo motion asset(s)"
                 )
-            except Exception as e:
-                result["errors"] += 1
-                trash_lookup_completed = False
-                if job_progress_callback:
-                    job_progress_callback(
-                        f"Error fetching trashed asset relationships: {e}"
-                    )
-
-            if trash_lookup_completed:
-                filtered_ids = self._remove_live_photo_motion_assets(
-                    trashed_motion_ids
-                )
-                if filtered_ids and job_progress_callback:
-                    job_progress_callback(
-                        f"Filtered {len(filtered_ids)} linked Live Photo motion asset(s)"
-                    )
 
         result["created"] -= len(filtered_ids & created_ids)
         result["updated"] -= len(filtered_ids & updated_ids)
         result["synced"] = result["created"] + result["updated"]
-        result["filtered"] = len(filtered_ids)
+        result["filtered"] = result.pop("skipped_motion", 0) + len(filtered_ids)
+        result["created_asset_ids"] = sorted(created_ids - filtered_ids)
+        result["synced_asset_ids"] = sorted(
+            (created_ids | updated_ids) - filtered_ids
+        )
         return result
+
+    def _prepare_motion_exclusions(
+        self,
+        page_size: int,
+        should_stop: Optional[Callable[[], bool]],
+        job_progress_callback=None,
+    ) -> Tuple[Set[str], bool, int]:
+        motion_ids = self._known_live_photo_motion_ids()
+        try:
+            trashed_motion_ids, completed = (
+                self._collect_trashed_live_photo_motion_ids(
+                    page_size=page_size,
+                    should_stop=should_stop,
+                    job_progress_callback=job_progress_callback,
+                )
+            )
+            motion_ids.update(trashed_motion_ids)
+            return motion_ids, completed, 0
+        except Exception as exc:
+            if job_progress_callback:
+                job_progress_callback(
+                    f"Error fetching trashed asset relationships: {exc}"
+                )
+            return set(), False, 1
+
+    def _known_live_photo_motion_ids(self) -> Set[str]:
+        query = self.db.query(Asset.raw_metadata_json)
+        if self.user_id:
+            query = query.filter(Asset.user_id == self.user_id)
+        return {
+            motion_id
+            for (metadata,) in query.all()
+            if isinstance(metadata, dict)
+            and (motion_id := metadata.get("livePhotoVideoId"))
+        }
 
     def _collect_trashed_live_photo_motion_ids(
         self,
@@ -258,14 +343,20 @@ class AssetSyncService:
         job_progress_callback=None,
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
+        full_sync: bool = False,
+        excluded_motion_ids: Optional[Set[str]] = None,
+        filter_motion_assets: bool = True,
     ) -> Tuple[Dict[str, int], bool, Set[str], Set[str]]:
-        created = updated = errors = 0
+        created = updated = unchanged = errors = 0
         created_ids: Set[str] = set()
         updated_ids: Set[str] = set()
         page = 1
         synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
         pending = 0  # rows flushed but not yet committed
         completed = False
+        if excluded_motion_ids is None:
+            excluded_motion_ids = set()
+        skipped_motion_ids: Set[str] = set()
 
         while True:
             # Cooperative stop check (pause/cancel)
@@ -287,14 +378,65 @@ class AssetSyncService:
                 completed = True
                 break
 
-            workers = min(self._DETAIL_FETCH_CONCURRENCY, len(raw_assets))
+            if filter_motion_assets:
+                excluded_motion_ids.update(
+                    raw["livePhotoVideoId"]
+                    for raw in raw_assets
+                    if raw.get("livePhotoVideoId")
+                )
+            syncable_assets = []
+            for raw in raw_assets:
+                if (
+                    filter_motion_assets
+                    and raw.get("id") in excluded_motion_ids
+                    and raw.get("type") == "VIDEO"
+                ):
+                    skipped_motion_ids.add(raw["id"])
+                else:
+                    syncable_assets.append(raw)
+
+            existing_by_immich_id = self._load_existing_assets(syncable_assets)
+            assets_to_hydrate = [
+                raw for raw in syncable_assets
+                if self._needs_hydration(
+                    raw,
+                    existing_by_immich_id.get(raw.get("id")),
+                    full_sync,
+                )
+            ]
+            page_unchanged = len(syncable_assets) - len(assets_to_hydrate)
+            page_motion = len(raw_assets) - len(syncable_assets)
+            unchanged += page_unchanged
+            if job_progress_callback and (
+                page_unchanged > 0 or page_motion > 0
+            ):
+                summary = (
+                    f"Page {page}: hydrating {len(assets_to_hydrate)} asset(s), "
+                    f"skipping {page_unchanged} unchanged"
+                )
+                if page_motion:
+                    summary += (
+                        f", filtering {page_motion} Live Photo companion(s)"
+                    )
+                job_progress_callback(summary)
+
+            workers = min(
+                self._DETAIL_FETCH_CONCURRENCY,
+                len(assets_to_hydrate),
+            )
+            if workers == 0:
+                if len(raw_assets) < page_size:
+                    completed = True
+                    break
+                page += 1
+                continue
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 detail_futures = [
                     executor.submit(self._hydrate_asset, raw)
-                    for raw in raw_assets
+                    for raw in assets_to_hydrate
                 ]
 
-            for raw, detail_future in zip(raw_assets, detail_futures):
+            for raw, detail_future in zip(assets_to_hydrate, detail_futures):
                 try:
                     hydrated = detail_future.result()
                     c, u, asset_id = self._upsert_asset(hydrated, synced_at)
@@ -331,12 +473,59 @@ class AssetSyncService:
             {
                 "created": created,
                 "updated": updated,
+                "unchanged": unchanged,
                 "errors": errors,
+                "skipped_motion": len(skipped_motion_ids),
             },
             completed,
             created_ids,
             updated_ids,
         )
+
+    def _load_existing_assets(
+        self,
+        raw_assets: List[Dict[str, Any]],
+    ) -> Dict[str, Asset]:
+        immich_ids = [
+            raw["id"] for raw in raw_assets
+            if raw.get("id")
+        ]
+        if not immich_ids:
+            return {}
+        query = self.db.query(Asset).filter(Asset.immich_id.in_(immich_ids))
+        if self.user_id:
+            query = query.filter(Asset.user_id == self.user_id)
+        return {asset.immich_id: asset for asset in query.all()}
+
+    def _needs_hydration(
+        self,
+        raw: Dict[str, Any],
+        existing: Optional[Asset],
+        full_sync: bool,
+    ) -> bool:
+        if full_sync or existing is None:
+            return True
+        if any(
+            value is None
+            for value in (
+                existing.tags_json,
+                existing.people_json,
+                existing.faces_json,
+                existing.raw_metadata_json,
+            )
+        ):
+            return True
+
+        remote_updated_at = _parse_dt(raw.get("updatedAt"))
+        stored_metadata = existing.raw_metadata_json
+        stored_updated_at = _parse_dt(
+            stored_metadata.get("updatedAt")
+            if isinstance(stored_metadata, dict)
+            else None
+        )
+        if remote_updated_at is None or stored_updated_at is None:
+            return True
+        return remote_updated_at != stored_updated_at
 
     def _remove_live_photo_motion_assets(
         self,

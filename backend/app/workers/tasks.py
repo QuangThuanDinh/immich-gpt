@@ -46,6 +46,7 @@ def run_asset_sync(
     album_ids: Optional[List[str]] = None,
     user_id: Optional[str] = None,
     run_routing_after: bool = False,
+    full_sync: bool = False,
 ) -> dict:
     db = SessionLocal()
     try:
@@ -64,11 +65,14 @@ def run_asset_sync(
             "favorites": "favourited assets",
             "albums": f"{len(album_ids or [])} album(s)",
         }.get(scope, scope)
+        sync_mode = "full" if full_sync else "incremental"
 
         job_svc.update_progress(
             job_id, status="syncing_assets",
             current_step=f"Syncing {scope_label} from Immich",
-            log_line=f"Asset sync started (scope: {scope_label})",
+            log_line=(
+                f"Asset sync started (scope: {scope_label}, mode: {sync_mode})"
+            ),
         )
 
         def progress_cb(msg: str):
@@ -86,17 +90,20 @@ def run_asset_sync(
                 result = sync_svc.sync_favorites(
                     job_progress_callback=progress_cb,
                     should_stop=should_stop,
+                    full_sync=full_sync,
                 )
             elif scope == "albums" and album_ids:
                 result = sync_svc.sync_albums(
                     album_ids,
                     job_progress_callback=progress_cb,
                     should_stop=should_stop,
+                    full_sync=full_sync,
                 )
             else:
                 result = sync_svc.sync_all(
                     job_progress_callback=progress_cb,
                     should_stop=should_stop,
+                    full_sync=full_sync,
                 )
 
         job_svc.flush()
@@ -106,16 +113,30 @@ def run_asset_sync(
             job_svc.complete_job(
                 job_id,
                 message=(
-                    f"Sync complete. Retained: {result['synced']}, "
+                    f"Sync complete. Hydrated: {result['synced']}, "
                     f"Created: {result['created']}, "
                     f"Updated: {result['updated']}, "
+                    f"Unchanged: {result.get('unchanged', 0)}, "
                     f"Live Photo motion assets filtered: {result.get('filtered', 0)}, "
                     f"Errors: {result['errors']}"
                 ),
             )
             if run_routing_after:
                 from ..workers.executor import enqueue_routing_classification
-                enqueue_routing_classification(db, user_id=user_id, force=False)
+                asset_ids = (
+                    result.get("synced_asset_ids")
+                    if full_sync
+                    else result.get("created_asset_ids")
+                )
+                if asset_ids:
+                    enqueue_routing_classification(
+                        db,
+                        user_id=user_id,
+                        asset_ids=asset_ids,
+                        force=False,
+                    )
+                else:
+                    progress_cb("No newly synced assets require routing")
         return result
 
     except Exception as e:

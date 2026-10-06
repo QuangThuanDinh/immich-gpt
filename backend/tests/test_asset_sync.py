@@ -126,6 +126,96 @@ def test_sync_hydrates_tags_and_people_from_asset_detail(db):
     assert "_faces" not in asset.raw_metadata_json
 
 
+def test_incremental_sync_skips_unchanged_hydrated_asset(db):
+    summary = _raw_asset(
+        "photo",
+        "IMAGE",
+        updatedAt="2026-10-05T12:00:00Z",
+    )
+    detail = {
+        **summary,
+        "tags": [],
+        "people": [],
+    }
+    immich = _PagedImmich(
+        {1: [summary]},
+        details={"photo": detail},
+    )
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    first_result = service.sync_all(page_size=10)
+    immich.detail_calls.clear()
+    immich.face_calls.clear()
+    second_result = service.sync_all(page_size=10)
+
+    assert first_result["created"] == 1
+    assert second_result["synced"] == 0
+    assert second_result["unchanged"] == 1
+    assert immich.detail_calls == []
+    assert immich.face_calls == []
+
+
+def test_incremental_sync_hydrates_changed_asset(db):
+    initial = _raw_asset(
+        "photo",
+        "IMAGE",
+        updatedAt="2026-10-05T12:00:00Z",
+    )
+    immich = _PagedImmich(
+        {1: [initial]},
+        details={"photo": {**initial, "tags": [], "people": []}},
+    )
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+    service.sync_all(page_size=10)
+
+    changed = {
+        **initial,
+        "updatedAt": "2026-10-05T13:00:00Z",
+    }
+    immich.pages = {1: [changed]}
+    immich.details = {
+        "photo": {
+            **changed,
+            "tags": [{"id": "tag-1", "name": "updated"}],
+            "people": [],
+        },
+    }
+    immich.detail_calls.clear()
+    immich.face_calls.clear()
+
+    result = service.sync_all(page_size=10)
+
+    asset = db.query(Asset).filter(Asset.immich_id == "photo").one()
+    assert result["updated"] == 1
+    assert result["unchanged"] == 0
+    assert immich.detail_calls == ["photo"]
+    assert immich.face_calls == ["photo"]
+    assert asset.tags_json == ["updated"]
+
+
+def test_full_sync_hydrates_unchanged_asset(db):
+    summary = _raw_asset(
+        "photo",
+        "IMAGE",
+        updatedAt="2026-10-05T12:00:00Z",
+    )
+    immich = _PagedImmich(
+        {1: [summary]},
+        details={"photo": {**summary, "tags": [], "people": []}},
+    )
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+    service.sync_all(page_size=10)
+    immich.detail_calls.clear()
+    immich.face_calls.clear()
+
+    result = service.sync_all(page_size=10, full_sync=True)
+
+    assert result["updated"] == 1
+    assert result["unchanged"] == 0
+    assert immich.detail_calls == ["photo"]
+    assert immich.face_calls == ["photo"]
+
+
 def test_sync_reports_asset_detail_failure_without_storing_summary(db):
     immich = _PagedImmich(
         {1: [_raw_asset("photo", "IMAGE")]},
@@ -164,13 +254,45 @@ def test_sync_filters_live_photo_motion_asset_after_all_pages(db):
         for asset in db.query(Asset).filter(Asset.user_id == TEST_USER_ID)
     }
     assert remaining_ids == {"still", "standalone-video"}
-    assert result == {
+    assert {
+        key: result[key]
+        for key in ("synced", "created", "updated", "filtered", "errors")
+    } == {
         "synced": 2,
         "created": 2,
         "updated": 0,
         "filtered": 1,
         "errors": 0,
     }
+
+
+def test_incremental_sync_does_not_rehydrate_filtered_live_photo_motion(db):
+    updated_at = "2026-10-05T12:00:00Z"
+    immich = _PagedImmich({
+        1: [
+            _raw_asset("motion", "VIDEO", updatedAt=updated_at),
+            _raw_asset(
+                "still",
+                "IMAGE",
+                livePhotoVideoId="motion",
+                updatedAt=updated_at,
+            ),
+        ],
+    })
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    first_result = service.sync_all(page_size=10)
+    immich.detail_calls.clear()
+    immich.face_calls.clear()
+    second_result = service.sync_all(page_size=10)
+
+    assert first_result["created"] == 1
+    assert first_result["filtered"] == 1
+    assert second_result["synced"] == 0
+    assert second_result["unchanged"] == 1
+    assert second_result["filtered"] == 1
+    assert immich.detail_calls == []
+    assert immich.face_calls == []
 
 
 def test_sync_filters_motion_asset_when_still_arrives_first(db):
@@ -249,7 +371,10 @@ def test_sync_filters_motion_asset_referenced_by_trashed_still(db):
     assert remaining_ids == {"standalone-video"}
     assert "trashed-still" not in remaining_ids
     assert immich.trashed_calls == [(1, 2), (2, 2)]
-    assert result == {
+    assert {
+        key: result[key]
+        for key in ("synced", "created", "updated", "filtered", "errors")
+    } == {
         "synced": 1,
         "created": 1,
         "updated": 0,
@@ -290,7 +415,7 @@ def test_sync_does_not_reconcile_after_trashed_asset_fetch_failure(db):
     )
 
 
-def test_sync_does_not_reconcile_when_stopped_during_trash_lookup(db):
+def test_sync_stops_before_asset_fetch_when_stopped_during_trash_lookup(db):
     immich = _PagedImmich(
         {
             1: [
@@ -312,7 +437,7 @@ def test_sync_does_not_reconcile_when_stopped_during_trash_lookup(db):
         asset.immich_id
         for asset in db.query(Asset).filter(Asset.user_id == TEST_USER_ID)
     }
-    assert remaining_ids == {"motion", "still"}
+    assert remaining_ids == set()
     assert result["filtered"] == 0
     assert result["errors"] == 0
 
@@ -391,7 +516,10 @@ def test_existing_motion_cleanup_does_not_reduce_new_retained_count(db):
 
     result = service.sync_all(page_size=10)
 
-    assert result == {
+    assert {
+        key: result[key]
+        for key in ("synced", "created", "updated", "filtered", "errors")
+    } == {
         "synced": 1,
         "created": 1,
         "updated": 0,
@@ -437,10 +565,10 @@ def test_multiple_albums_reconcile_once_after_all_albums(db):
 
     assert result["synced"] == 1
     assert result["filtered"] == 1
-    assert [
-        line for line in log_lines
-        if line.startswith("Filtered ")
-    ] == ["Filtered 1 linked Live Photo motion asset(s)"]
+    assert any(
+        "filtering 1 Live Photo companion(s)" in line
+        for line in log_lines
+    )
 
 
 def test_album_sync_filters_motion_referenced_by_trashed_still(db):
@@ -472,7 +600,10 @@ def test_album_sync_filters_motion_referenced_by_trashed_still(db):
     result = service.sync_album("motion-album", page_size=10)
 
     assert db.query(Asset).filter(Asset.user_id == TEST_USER_ID).count() == 0
-    assert result == {
+    assert {
+        key: result[key]
+        for key in ("synced", "created", "updated", "filtered", "errors")
+    } == {
         "synced": 0,
         "created": 0,
         "updated": 0,

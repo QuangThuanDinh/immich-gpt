@@ -36,8 +36,12 @@ class SyncJobRequest(BaseModel):
       - "all"       – every asset (current default behaviour)
       - "favorites" – only assets marked as favourite
       - "albums"    – only assets belonging to the albums listed in album_ids
+
+    Incremental sync is the default. Set full_sync to rehydrate every asset in
+    the selected scope.
     """
 
     scope: Literal["all", "favorites", "albums"] = "all"
     album_ids: Optional[List[str]] = None
     run_routing_after: bool = False
+    full_sync: bool = False

@@ -164,6 +164,18 @@ def test_start_sync_job_persists_route_after_sync(client, db):
     assert r.status_code == 200
     job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
     assert job.params_json["run_routing_after"] is True
+    assert job.params_json["full_sync"] is False
+    assert mock_enqueue.call_args.args[-2] is True
+    assert mock_enqueue.call_args.args[-1] is False
+
+
+def test_start_sync_job_persists_full_sync(client, db):
+    with patch("app.routers.jobs._enqueue") as mock_enqueue:
+        r = client.post("/api/jobs/sync", json={"scope": "all", "full_sync": True})
+
+    assert r.status_code == 200
+    job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
+    assert job.params_json["full_sync"] is True
     assert mock_enqueue.call_args.args[-1] is True
 
 
@@ -184,7 +196,14 @@ def test_run_asset_sync_enqueues_routing_after_success(db, monkeypatch):
             pass
 
         def sync_all(self, **kwargs):
-            return {"synced": 1, "created": 1, "updated": 0, "errors": 0}
+            return {
+                "synced": 1,
+                "created": 1,
+                "updated": 0,
+                "unchanged": 4,
+                "errors": 0,
+                "created_asset_ids": ["new-local-id"],
+            }
 
     monkeypatch.setattr("app.workers.tasks.SessionLocal", lambda: db)
     monkeypatch.setattr("app.workers.tasks._get_user_immich_client", lambda *args: object())
@@ -200,11 +219,12 @@ def test_run_asset_sync_enqueues_routing_after_success(db, monkeypatch):
     refreshed = db.query(JobRun).filter(JobRun.id == job_id).first()
     assert refreshed.status == "completed"
     assert refreshed.message == (
-        "Sync complete. Retained: 1, Created: 1, Updated: 0, "
+        "Sync complete. Hydrated: 1, Created: 1, Updated: 0, Unchanged: 4, "
         "Live Photo motion assets filtered: 0, Errors: 0"
     )
     assert enqueued
     assert enqueued[0][1]["user_id"] == TEST_USER_ID
+    assert enqueued[0][1]["asset_ids"] == ["new-local-id"]
     assert enqueued[0][1]["force"] is False
 
 
