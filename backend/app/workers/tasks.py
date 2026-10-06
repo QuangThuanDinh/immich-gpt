@@ -40,6 +40,17 @@ def _get_user_immich_client(db, user_id: Optional[str]) -> ImmichClient:
     return ImmichClient(url, api_key)
 
 
+def _should_stop_job(job_id: str) -> bool:
+    from ..models.job_run import JobRun
+
+    control_db = SessionLocal()
+    try:
+        job = control_db.query(JobRun).filter(JobRun.id == job_id).first()
+        return job is not None and job.status in ("paused", "cancelled")
+    finally:
+        control_db.close()
+
+
 def run_asset_sync(
     job_id: str,
     scope: str = "all",
@@ -79,9 +90,7 @@ def run_asset_sync(
             job_svc.update_progress(job_id, log_line=msg, flush=False)
 
         def should_stop() -> bool:
-            db.expire_all()
-            j = db.query(_JobRun).filter(_JobRun.id == job_id).first()
-            return j is not None and j.status in ("paused", "cancelled")
+            return _should_stop_job(job_id)
 
         with _immich_client_context(_get_user_immich_client(db, user_id)) as immich:
             sync_svc = AssetSyncService(db, immich, user_id=user_id)

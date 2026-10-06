@@ -8,7 +8,9 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.orm import sessionmaker
 
+from app.models.asset import Asset
 from app.models.job_run import JobRun
 
 
@@ -263,6 +265,85 @@ def test_run_asset_sync_does_not_enqueue_routing_when_paused(db, monkeypatch):
     refreshed = db.query(JobRun).filter(JobRun.id == job_id).first()
     assert refreshed.status == "paused"
     assert enqueued == []
+
+
+def test_run_asset_sync_stop_check_preserves_pending_asset_updates(
+    db,
+    monkeypatch,
+):
+    from app.services.job_progress import JobProgressService
+    from app.workers.tasks import run_asset_sync
+    from tests.conftest import TEST_USER_ID
+
+    job = JobProgressService(db).create_job(
+        "asset_sync",
+        params={"scope": "all", "full_sync": True},
+        user_id=TEST_USER_ID,
+    )
+    asset = Asset(
+        id="local-asset",
+        user_id=TEST_USER_ID,
+        immich_id="immich-asset",
+        asset_type="IMAGE",
+        people_json=None,
+        faces_json=None,
+    )
+    db.add(asset)
+    db.commit()
+    asset_id = asset.id
+    ControlSession = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=db.get_bind(),
+    )
+    session_calls = 0
+
+    def session_factory():
+        nonlocal session_calls
+        session_calls += 1
+        return db if session_calls == 1 else ControlSession()
+
+    class FakeAssetSyncService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def sync_all(self, **kwargs):
+            asset.people_json = [{"id": "person-1", "name": "Minh Ha"}]
+            asset.faces_json = [{"id": "face-1", "person_name": "Minh Ha"}]
+
+            assert kwargs["should_stop"]() is False
+            assert asset in db.dirty
+            assert asset.people_json[0]["name"] == "Minh Ha"
+
+            db.commit()
+            return {
+                "synced": 1,
+                "created": 0,
+                "updated": 1,
+                "unchanged": 0,
+                "errors": 0,
+            }
+
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", session_factory)
+    monkeypatch.setattr(
+        "app.workers.tasks._get_user_immich_client",
+        lambda *args: object(),
+    )
+    monkeypatch.setattr(
+        "app.workers.tasks.AssetSyncService",
+        FakeAssetSyncService,
+    )
+
+    run_asset_sync(
+        job.id,
+        user_id=TEST_USER_ID,
+        full_sync=True,
+    )
+
+    refreshed = db.query(Asset).filter(Asset.id == asset_id).one()
+    assert refreshed.people_json[0]["name"] == "Minh Ha"
+    assert refreshed.faces_json[0]["person_name"] == "Minh Ha"
+    assert session_calls >= 2
 
 
 # ---------------------------------------------------------------------------
