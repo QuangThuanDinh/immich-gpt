@@ -313,6 +313,7 @@ class AssetSyncService:
         query = self.db.query(
             Asset.id,
             Asset.immich_id,
+            Asset.asset_type,
             Asset.tags_json,
             Asset.people_json,
             Asset.faces_json,
@@ -325,6 +326,7 @@ class AssetSyncService:
             for (
                 asset_id,
                 immich_id,
+                asset_type,
                 tags,
                 people,
                 faces,
@@ -334,7 +336,10 @@ class AssetSyncService:
                 value is None
                 for value in (tags, people, faces, raw_metadata)
             )
-            if immich_id not in excluded_motion_ids
+            if not (
+                asset_type == "VIDEO"
+                and immich_id in excluded_motion_ids
+            )
         ]
         if not candidates:
             return 0, 0, set()

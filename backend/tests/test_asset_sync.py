@@ -269,6 +269,65 @@ def test_full_sync_recovers_incomplete_asset_omitted_from_listing(db):
     assert asset.faces_json[0]["person_name"] == "Minh Ha"
 
 
+def test_full_sync_recovers_unlisted_image_referenced_as_motion_asset(db):
+    image = Asset(
+        id="legacy-local-id",
+        user_id=TEST_USER_ID,
+        immich_id="legacy-photo",
+        asset_type="IMAGE",
+        tags_json=None,
+        people_json=None,
+        faces_json=None,
+        raw_metadata_json=None,
+    )
+    referencing_asset = Asset(
+        id="referencing-local-id",
+        user_id=TEST_USER_ID,
+        immich_id="referencing-photo",
+        asset_type="IMAGE",
+        tags_json=[],
+        people_json=[],
+        faces_json=[],
+        raw_metadata_json={"livePhotoVideoId": "legacy-photo"},
+    )
+    db.add_all([image, referencing_asset])
+    db.commit()
+    detail = _raw_asset(
+        "legacy-photo",
+        "IMAGE",
+        tags=[],
+        people=[{"id": "person-1", "name": "Minh Ha"}],
+    )
+    immich = _PagedImmich(
+        {1: []},
+        details={"legacy-photo": detail},
+        faces={
+            "legacy-photo": [{
+                "id": "face-1",
+                "boundingBoxX1": 10,
+                "boundingBoxY1": 20,
+                "boundingBoxX2": 110,
+                "boundingBoxY2": 140,
+                "imageWidth": 1920,
+                "imageHeight": 1440,
+                "sourceType": "machine-learning",
+                "person": {"id": "person-1", "name": "Minh Ha"},
+            }],
+        },
+    )
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(page_size=10, full_sync=True)
+
+    db.refresh(image)
+    assert result["updated"] == 1
+    assert result["errors"] == 0
+    assert immich.detail_calls == ["legacy-photo"]
+    assert immich.face_calls == ["legacy-photo"]
+    assert image.people_json[0]["name"] == "Minh Ha"
+    assert image.faces_json[0]["person_name"] == "Minh Ha"
+
+
 def test_full_sync_saves_recovery_progress_before_all_hydration_finishes(db):
     release_last_asset = Event()
 
