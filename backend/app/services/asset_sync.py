@@ -58,6 +58,17 @@ class AssetSyncService:
             excluded_motion_ids=excluded_motion_ids,
             filter_motion_assets=trash_lookup_completed,
         )
+        if full_sync and completed:
+            recovery_updated, recovery_errors, recovery_ids = (
+                self._recover_incomplete_assets(
+                    excluded_motion_ids,
+                    job_progress_callback,
+                    should_stop,
+                )
+            )
+            result["updated"] += recovery_updated
+            result["errors"] += recovery_errors
+            updated_ids.update(recovery_ids)
         result["errors"] += preparation_errors
         return self._finish_sync(
             result,
@@ -292,6 +303,90 @@ class AssetSyncService:
             if isinstance(metadata, dict)
             and (motion_id := metadata.get("livePhotoVideoId"))
         }
+
+    def _recover_incomplete_assets(
+        self,
+        excluded_motion_ids: Set[str],
+        job_progress_callback=None,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> Tuple[int, int, Set[str]]:
+        query = self.db.query(
+            Asset.id,
+            Asset.immich_id,
+            Asset.tags_json,
+            Asset.people_json,
+            Asset.faces_json,
+            Asset.raw_metadata_json,
+        )
+        if self.user_id:
+            query = query.filter(Asset.user_id == self.user_id)
+        candidates = [
+            (asset_id, immich_id)
+            for (
+                asset_id,
+                immich_id,
+                tags,
+                people,
+                faces,
+                raw_metadata,
+            ) in query.all()
+            if any(
+                value is None
+                for value in (tags, people, faces, raw_metadata)
+            )
+            if immich_id not in excluded_motion_ids
+        ]
+        if not candidates:
+            return 0, 0, set()
+
+        if job_progress_callback:
+            job_progress_callback(
+                f"Full Sync recovery: hydrating {len(candidates)} incomplete "
+                "legacy asset(s) omitted from the asset listing"
+            )
+
+        updated = errors = 0
+        updated_ids: Set[str] = set()
+        synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        workers = min(self._DETAIL_FETCH_CONCURRENCY, len(candidates))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(self._hydrate_asset, {"id": immich_id})
+                for _, immich_id in candidates
+            ]
+
+        pending = 0
+        for (_, immich_id), future in zip(candidates, futures):
+            if should_stop and should_stop():
+                if job_progress_callback:
+                    job_progress_callback(
+                        "Full Sync recovery stopped due to pause/cancel request."
+                    )
+                break
+            try:
+                hydrated = future.result()
+                _, was_updated, asset_id = self._upsert_asset(
+                    hydrated,
+                    synced_at,
+                )
+                updated += was_updated
+                if asset_id:
+                    updated_ids.add(asset_id)
+                pending += 1
+            except Exception as exc:
+                errors += 1
+                if job_progress_callback:
+                    job_progress_callback(
+                        f"Error recovering incomplete asset {immich_id}: {exc}"
+                    )
+
+            if pending >= self._COMMIT_BATCH_SIZE:
+                self.db.commit()
+                pending = 0
+
+        if pending:
+            self.db.commit()
+        return updated, errors, updated_ids
 
     def _collect_trashed_live_photo_motion_ids(
         self,

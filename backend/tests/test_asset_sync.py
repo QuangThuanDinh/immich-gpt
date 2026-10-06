@@ -216,6 +216,80 @@ def test_full_sync_hydrates_unchanged_asset(db):
     assert immich.face_calls == ["photo"]
 
 
+def test_full_sync_recovers_incomplete_asset_omitted_from_listing(db):
+    asset = Asset(
+        id="legacy-local-id",
+        user_id=TEST_USER_ID,
+        immich_id="legacy-photo",
+        asset_type="IMAGE",
+        tags_json=None,
+        people_json=None,
+        faces_json=None,
+        raw_metadata_json=None,
+    )
+    db.add(asset)
+    db.commit()
+    detail = _raw_asset(
+        "legacy-photo",
+        "IMAGE",
+        updatedAt="2026-10-05T12:00:00Z",
+        tags=[{"id": "tag-1", "name": "family"}],
+        people=[{"id": "person-1", "name": "Minh Ha"}],
+    )
+    immich = _PagedImmich(
+        {1: []},
+        details={"legacy-photo": detail},
+        faces={
+            "legacy-photo": [{
+                "id": "face-1",
+                "boundingBoxX1": 10,
+                "boundingBoxY1": 20,
+                "boundingBoxX2": 110,
+                "boundingBoxY2": 140,
+                "imageWidth": 1920,
+                "imageHeight": 1440,
+                "sourceType": "machine-learning",
+                "person": {"id": "person-1", "name": "Minh Ha"},
+            }],
+        },
+    )
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(page_size=10, full_sync=True)
+
+    db.refresh(asset)
+    assert result["updated"] == 1
+    assert result["errors"] == 0
+    assert immich.detail_calls == ["legacy-photo"]
+    assert immich.face_calls == ["legacy-photo"]
+    assert asset.tags_json == ["family"]
+    assert asset.people_json[0]["name"] == "Minh Ha"
+    assert asset.faces_json[0]["person_name"] == "Minh Ha"
+
+
+def test_incremental_sync_leaves_unlisted_incomplete_asset_untouched(db):
+    asset = Asset(
+        id="legacy-local-id",
+        user_id=TEST_USER_ID,
+        immich_id="legacy-photo",
+        asset_type="IMAGE",
+        tags_json=None,
+        people_json=None,
+        faces_json=None,
+        raw_metadata_json=None,
+    )
+    db.add(asset)
+    db.commit()
+    immich = _PagedImmich({1: []})
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(page_size=10)
+
+    assert result["updated"] == 0
+    assert immich.detail_calls == []
+    assert immich.face_calls == []
+
+
 def test_sync_reports_asset_detail_failure_without_storing_summary(db):
     immich = _PagedImmich(
         {1: [_raw_asset("photo", "IMAGE")]},
