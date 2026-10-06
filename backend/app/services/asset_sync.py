@@ -2,7 +2,7 @@
 Asset sync service: pulls assets from Immich and stores them locally.
 """
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable, Set, Tuple
 from sqlalchemy.orm import Session
@@ -349,40 +349,80 @@ class AssetSyncService:
         updated_ids: Set[str] = set()
         synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
         workers = min(self._DETAIL_FETCH_CONCURRENCY, len(candidates))
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [
-                executor.submit(self._hydrate_asset, {"id": immich_id})
-                for _, immich_id in candidates
-            ]
-
+        candidate_iterator = iter(candidates)
+        processed = 0
         pending = 0
-        for (_, immich_id), future in zip(candidates, futures):
-            if should_stop and should_stop():
-                if job_progress_callback:
-                    job_progress_callback(
-                        "Full Sync recovery stopped due to pause/cancel request."
-                    )
-                break
-            try:
-                hydrated = future.result()
-                _, was_updated, asset_id = self._upsert_asset(
-                    hydrated,
-                    synced_at,
-                )
-                updated += was_updated
-                if asset_id:
-                    updated_ids.add(asset_id)
-                pending += 1
-            except Exception as exc:
-                errors += 1
-                if job_progress_callback:
-                    job_progress_callback(
-                        f"Error recovering incomplete asset {immich_id}: {exc}"
-                    )
 
-            if pending >= self._COMMIT_BATCH_SIZE:
-                self.db.commit()
-                pending = 0
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            in_flight = {}
+
+            def submit_next() -> bool:
+                try:
+                    candidate = next(candidate_iterator)
+                except StopIteration:
+                    return False
+                _, immich_id = candidate
+                future = executor.submit(
+                    self._hydrate_asset,
+                    {"id": immich_id},
+                )
+                in_flight[future] = candidate
+                return True
+
+            for _ in range(workers):
+                submit_next()
+
+            stopped = False
+            while in_flight and not stopped:
+                done, _ = wait(
+                    in_flight,
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in done:
+                    _, immich_id = in_flight.pop(future)
+                    if should_stop and should_stop():
+                        stopped = True
+                        if job_progress_callback:
+                            job_progress_callback(
+                                "Full Sync recovery stopped due to "
+                                "pause/cancel request."
+                            )
+                        break
+                    try:
+                        hydrated = future.result()
+                        _, was_updated, asset_id = self._upsert_asset(
+                            hydrated,
+                            synced_at,
+                        )
+                        updated += was_updated
+                        if asset_id:
+                            updated_ids.add(asset_id)
+                        pending += 1
+                    except Exception as exc:
+                        errors += 1
+                        if job_progress_callback:
+                            job_progress_callback(
+                                "Error recovering incomplete asset "
+                                f"{immich_id}: {exc}"
+                            )
+
+                    processed += 1
+                    if pending >= self._COMMIT_BATCH_SIZE:
+                        self.db.commit()
+                        pending = 0
+                    if (
+                        job_progress_callback
+                        and (
+                            processed % self._COMMIT_BATCH_SIZE == 0
+                            or processed == len(candidates)
+                        )
+                    ):
+                        job_progress_callback(
+                            "Full Sync recovery progress: "
+                            f"{processed}/{len(candidates)} processed, "
+                            f"{errors} error(s)"
+                        )
+                    submit_next()
 
         if pending:
             self.db.commit()

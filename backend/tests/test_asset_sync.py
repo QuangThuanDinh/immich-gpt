@@ -1,4 +1,6 @@
 """Asset synchronization reconciliation tests."""
+from threading import Event
+
 from app.models.asset import Asset
 from app.services.asset_sync import AssetSyncService
 from tests.conftest import TEST_USER_ID
@@ -265,6 +267,60 @@ def test_full_sync_recovers_incomplete_asset_omitted_from_listing(db):
     assert asset.tags_json == ["family"]
     assert asset.people_json[0]["name"] == "Minh Ha"
     assert asset.faces_json[0]["person_name"] == "Minh Ha"
+
+
+def test_full_sync_saves_recovery_progress_before_all_hydration_finishes(db):
+    release_last_asset = Event()
+
+    class _BlockingLastAssetImmich(_PagedImmich):
+        def get_asset(self, asset_id):
+            self.detail_calls.append(asset_id)
+            if asset_id == "legacy-100":
+                if not release_last_asset.wait(timeout=2):
+                    raise RuntimeError(
+                        "last hydration started before recovery progress was saved"
+                    )
+            return _raw_asset(
+                asset_id,
+                "IMAGE",
+                tags=[],
+                people=[],
+            )
+
+    db.add_all([
+        Asset(
+            id=f"legacy-local-{index}",
+            user_id=TEST_USER_ID,
+            immich_id=f"legacy-{index}",
+            asset_type="IMAGE",
+            tags_json=None,
+            people_json=None,
+            faces_json=None,
+            raw_metadata_json=None,
+        )
+        for index in range(101)
+    ])
+    db.commit()
+    immich = _BlockingLastAssetImmich({1: []})
+    log_lines = []
+
+    def capture_progress(message):
+        log_lines.append(message)
+        if message.startswith("Full Sync recovery progress: 100/101"):
+            release_last_asset.set()
+
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(
+        page_size=10,
+        full_sync=True,
+        job_progress_callback=capture_progress,
+    )
+
+    assert result["updated"] == 101
+    assert result["errors"] == 0
+    assert release_last_asset.is_set()
+    assert "Full Sync recovery progress: 101/101 processed, 0 error(s)" in log_lines
 
 
 def test_incremental_sync_leaves_unlisted_incomplete_asset_untouched(db):
