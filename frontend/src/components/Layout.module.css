@@ -17,6 +17,22 @@
   flex-shrink: 0;
 }
 
+@media (min-width: 901px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .nav {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
 .logo {
   padding: 0 var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--border);

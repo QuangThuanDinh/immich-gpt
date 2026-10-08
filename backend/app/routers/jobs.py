@@ -298,6 +298,7 @@ def _resume_job_task(job_id: str) -> None:
                 params.get("limit"),
                 params.get("force", False),
                 user_id,
+                params.get("review_only", False),
             )
     finally:
         db.close()

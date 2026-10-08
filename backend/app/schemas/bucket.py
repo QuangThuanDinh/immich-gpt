@@ -236,6 +236,7 @@ class RoutingClassifyRequest(BaseModel):
     asset_ids: Optional[List[str]] = None
     limit: Optional[int] = None
     force: bool = False
+    review_only: bool = False
 
 
 class PlanItemMoveRequest(BaseModel):

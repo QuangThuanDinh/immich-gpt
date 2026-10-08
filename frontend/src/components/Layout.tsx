@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/useAuth";
 import SidebarContext from "../contexts/SidebarContext";
 import { useJobCompletion } from "../hooks/useJobCompletion";
 import BrandLogo from "./BrandLogo";
+import TimezoneProvider from "./TimezoneProvider";
 import {
   LayoutDashboard, Settings, Activity, Images, ClipboardList,
   Users, LogOut, Heart, Network, GitBranch,
@@ -29,13 +30,14 @@ export default function Layout() {
   useJobCompletion();
 
   return (
-    <SidebarContext.Provider
-      value={{
-        isOpen: sidebarOpen,
-        toggle: () => setSidebarOpen((open) => !open),
-        close: () => setSidebarOpen(false),
-      }}
-    >
+    <TimezoneProvider>
+      <SidebarContext.Provider
+        value={{
+          isOpen: sidebarOpen,
+          toggle: () => setSidebarOpen((open) => !open),
+          close: () => setSidebarOpen(false),
+        }}
+      >
       <div className={styles.root}>
       <button
         type="button"
@@ -111,6 +113,7 @@ export default function Layout() {
         <Outlet />
       </main>
       </div>
-    </SidebarContext.Provider>
+      </SidebarContext.Provider>
+    </TimezoneProvider>
   );
 }

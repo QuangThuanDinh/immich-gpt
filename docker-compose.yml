@@ -22,7 +22,7 @@
 services:
 
   app:
-    image: ${IMMICH_GPT_IMAGE:-ghcr.io/quangthuandinh/immich-gpt:0.6.24}
+    image: ${IMMICH_GPT_IMAGE:-ghcr.io/quangthuandinh/immich-gpt:0.6.25}
     # `docker compose build` requires Docker Buildx >= 0.17.
     # On older Unraid / distro Docker installs, build locally with:
     #   ./build.sh
@@ -51,6 +51,8 @@ services:
       # ── AI provider ────────────────────────────────────────────────────
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      # IANA timezone used by the UI and job log timestamps.
+      TZ: ${TZ:-UTC}
       # Number of photos per page in Routing Plan review (1-100).
       ROUTING_PLAN_PAGE_SIZE: ${ROUTING_PLAN_PAGE_SIZE:-20}
       # ── Authentication ─────────────────────────────────────────────────

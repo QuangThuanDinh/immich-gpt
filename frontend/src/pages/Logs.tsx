@@ -7,6 +7,7 @@ import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import { usePageVisible } from "../hooks/usePageVisible";
 import type { AuditLog, JobRun } from "../types";
 import { CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Search, Copy, Check } from "lucide-react";
+import { useTimezone } from "../hooks/useTimezone";
 
 const PAGE_SIZE = 50;
 const ACTIVE_JOB_STATUSES = new Set(["queued", "starting", "syncing_assets", "preparing_image", "classifying_ai", "validating_result", "saving_suggestion", "writing_results"]);
@@ -76,6 +77,7 @@ function CopyButton({ value }: { value: string }) {
 
 function LogRow({ log, onJobFilter }: { log: AuditLog; onJobFilter: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false);
+  const { formatDateTime } = useTimezone();
   const jsonStr = JSON.stringify(log, null, 2);
 
   return (
@@ -139,7 +141,7 @@ function LogRow({ log, onJobFilter }: { log: AuditLog; onJobFilter: (id: string)
 
         {/* Timestamp */}
         <span style={{ fontSize: 11, color: "#475569" }}>
-          {new Date(log.created_at).toLocaleString()}
+          {formatDateTime(log.created_at)}
         </span>
 
         {expanded ? <ChevronUp size={12} color="#475569" /> : <ChevronDown size={12} color="#475569" />}
@@ -194,6 +196,7 @@ function JobLogRow({
   onJobFilter: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const { formatDateTime } = useTimezone();
   const logLines = job.log_lines ?? [];
   const hasLogs = logLines.length > 0;
   const isFiltered = activeJobFilter === job.id;
@@ -240,7 +243,7 @@ function JobLogRow({
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <div style={{ textAlign: "right", fontSize: 11, color: "#64748b" }}>
             <div>Updated</div>
-            <div>{new Date(job.updated_at ?? job.created_at).toLocaleString()}</div>
+            <div>{formatDateTime(job.updated_at ?? job.created_at)}</div>
           </div>
           {expanded ? <ChevronUp size={12} color="#475569" /> : <ChevronDown size={12} color="#475569" />}
         </div>

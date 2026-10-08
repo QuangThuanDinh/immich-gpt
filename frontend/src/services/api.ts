@@ -102,6 +102,9 @@ export const getHealth = () => api.get("/health").then((r) => r.data);
 export const getImmichSettings = (): Promise<ImmichSettings> =>
   api.get("/settings/immich").then((r) => r.data);
 
+export const getRuntimeSettings = (): Promise<{ timezone: string }> =>
+  api.get("/settings/runtime").then((r) => r.data);
+
 export const saveImmichSettings = (url: string, apiKey: string): Promise<ImmichSettings> =>
   api.post("/settings/immich", { immich_url: url, immich_api_key: apiKey }).then((r) => r.data);
 
@@ -153,6 +156,9 @@ export const getAssets = (params?: {
 
 export const getAsset = (assetId: string): Promise<Asset> =>
   api.get(`/assets/${assetId}`).then((r) => r.data);
+
+export const refreshAssetMetadata = (assetId: string): Promise<Asset> =>
+  api.post(`/assets/${assetId}/refresh`).then((r) => r.data);
 
 export const getAssetCount = (params?: {
   asset_type?: string;
@@ -267,6 +273,7 @@ export const startRoutingClassify = (data?: {
   asset_ids?: string[];
   limit?: number;
   force?: boolean;
+  review_only?: boolean;
 }) =>
   api.post("/routing/classify", data ?? {}).then(
     (r) => r.data as { job_id: string; plan_id: string; status: string }
@@ -300,6 +307,9 @@ export const listRoutingPlans = (params?: { status?: string }): Promise<RoutingP
 
 export const getRoutingPlan = (planId: string): Promise<RoutingPlan> =>
   api.get(`/routing/plans/${planId}`).then((r) => r.data);
+
+export const deleteRoutingPlan = (planId: string): Promise<{ deleted: boolean }> =>
+  api.delete(`/routing/plans/${planId}`).then((r) => r.data);
 
 export const getRoutingPlanSummary = (planId: string): Promise<RoutingPlanSummary> =>
   api.get(`/routing/plans/${planId}/summary`).then((r) => r.data);

@@ -118,13 +118,14 @@ DATA_DIR=/mnt/user/appdata/immich-gpt   # Unraid default
 | `IMMICH_API_KEY` | *(empty)* | Immich API key — can also be set per-user in the UI |
 | `OPENAI_API_KEY` | *(empty)* | OpenAI key (optional — configure via UI per user) |
 | `OPENAI_MODEL` | `gpt-4o` | Default model when using env-based OpenAI config |
+| `TZ` | `UTC` | IANA timezone used for displayed timestamps and job log clocks (for example, `America/Vancouver`) |
 | `WORKER_CONCURRENCY` | `2` | Background job threads (built-in thread pool only) |
 | `ROUTING_PLAN_PAGE_SIZE` | `20` | Photos shown per Routing Plan review page (1–100) |
 | `REDIS_URL` | *(empty)* | Optional — set to `redis://host:6379/0` to enable RQ workers |
 | `DATABASE_URL` | `sqlite:////data/immich_gpt.db` | SQLite database path |
 | `LOG_LEVEL` | `INFO` | Logging verbosity: DEBUG, INFO, WARNING, ERROR |
 | `APP_PORT` | `8000` | Host port (Compose only) |
-| `IMMICH_GPT_IMAGE` | `ghcr.io/quangthuandinh/immich-gpt:0.6.24` | Image tag used by `docker-compose.yml` |
+| `IMMICH_GPT_IMAGE` | `ghcr.io/quangthuandinh/immich-gpt:0.6.25` | Image tag used by `docker-compose.yml` |
 
 ### Internet-exposed deployments
 

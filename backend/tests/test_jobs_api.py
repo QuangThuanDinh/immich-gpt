@@ -377,6 +377,19 @@ def test_start_routing_classify_persists_plan_id(client, db):
     assert job.params_json["plan_id"] == r.json()["plan_id"]
 
 
+def test_start_routing_classify_persists_review_only(client, db):
+    with patch("app.workers.executor.enqueue") as mock_enqueue:
+        r = client.post(
+            "/api/routing/classify",
+            json={"asset_ids": ["asset-1"], "force": True, "review_only": True},
+        )
+
+    assert r.status_code == 200
+    job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
+    assert job.params_json["review_only"] is True
+    assert mock_enqueue.call_args.args[-1] is True
+
+
 def test_resume_routing_classification_uses_original_plan(db, monkeypatch):
     from app.routers.jobs import _resume_job_task
     from app.services.job_progress import JobProgressService

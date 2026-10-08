@@ -1,6 +1,7 @@
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 from typing import List
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Minimum acceptable length for SECRET_KEY (256-bit entropy when hex-encoded).
 _SECRET_KEY_MIN_LENGTH = 32
@@ -19,8 +20,9 @@ _WEAK_SECRET_KEYS = {
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "Immich GPT"
-    APP_VERSION: str = "0.6.24"
+    APP_VERSION: str = "0.6.25"
     DEBUG: bool = False
+    TZ: str = "UTC"
 
     # Database — SQLite is the supported and recommended database.
     # The path inside the container should always be under /data so it lands
@@ -86,6 +88,18 @@ class Settings(BaseSettings):
 
     # Rate limiting — disable in test environments to avoid shared-IP collisions.
     RATELIMIT_ENABLED: bool = True
+
+    @field_validator("TZ")
+    @classmethod
+    def _validate_timezone(cls, value: str) -> str:
+        timezone_name = value.strip()
+        try:
+            ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(
+                f"TZ must be a valid IANA timezone, got {value!r}"
+            ) from exc
+        return timezone_name
 
     @model_validator(mode="after")
     def _validate_secret_key(self) -> "Settings":

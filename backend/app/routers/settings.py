@@ -36,6 +36,12 @@ _AZURE_API_VERSION = "azure_api_version"
 _AZURE_DEPLOYMENT = "azure_deployment"
 
 
+@router.get("/runtime")
+def get_runtime_settings(_user=Depends(require_active_user)):
+    from ..config import settings
+    return {"timezone": settings.TZ}
+
+
 def _get_setting(db: Session, user_id: str, key: str) -> Optional[str]:
     row = db.query(AppSetting).filter(
         AppSetting.user_id == user_id, AppSetting.key == key

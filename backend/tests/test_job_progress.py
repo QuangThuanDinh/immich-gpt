@@ -91,6 +91,22 @@ def test_log_lines_appended(db):
     assert any("Step 2 running" in l for l in lines)
 
 
+def test_log_timestamp_uses_configured_timezone(monkeypatch):
+    from datetime import datetime, timezone
+    from app.services import job_progress
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+    monkeypatch.setattr(job_progress, "datetime", FixedDatetime)
+    monkeypatch.setattr(job_progress.settings, "TZ", "America/Vancouver")
+
+    assert job_progress._log_timestamp() == "04:00:00"
+
+
 def test_defer_commits_batches_progress(db):
     svc = JobProgressService(db)
     job = svc.create_job("classification")

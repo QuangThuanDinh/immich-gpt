@@ -280,6 +280,7 @@ The project supports both environment-based defaults and per-user settings in th
 | `SESSION_COOKIE_SECURE` | Must be `true` behind HTTPS, `false` for plain HTTP |
 | `OPENAI_API_KEY` | Optional default OpenAI key |
 | `OPENAI_MODEL` | Default OpenAI model |
+| `TZ` | IANA timezone for displayed timestamps and job log clocks (default: `UTC`) |
 | `REDIS_URL` | Optional Redis for RQ worker mode |
 | `WORKER_CONCURRENCY` | Thread count for built-in background jobs |
 | `LOG_LEVEL` | Logging verbosity |

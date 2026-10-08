@@ -358,6 +358,103 @@ def test_plan_reject_is_immediate_without_immich_writeback(
     client_factory.assert_not_called()
 
 
+def test_delete_plan_removes_items_and_enforces_ownership(client, db):
+    plan = RoutingPlan(
+        id="ephemeral-plan",
+        user_id=TEST_USER_ID,
+        status="ready",
+    )
+    item = RoutingPlanItem(
+        id="ephemeral-item",
+        user_id=TEST_USER_ID,
+        plan_id=plan.id,
+        asset_id="local-asset-id",
+        status="rejected",
+    )
+    other_plan = RoutingPlan(
+        id="other-user-plan",
+        user_id="other-user",
+        status="ready",
+    )
+    db.add_all([plan, item, other_plan])
+    db.commit()
+    item_id = item.id
+
+    deleted = client.delete(f"/api/routing/plans/{plan.id}")
+    forbidden = client.delete(f"/api/routing/plans/{other_plan.id}")
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True}
+    assert forbidden.status_code == 404
+    assert db.query(RoutingPlan).filter(RoutingPlan.id == plan.id).first() is None
+    assert db.query(RoutingPlanItem).filter(RoutingPlanItem.id == item_id).first() is None
+    assert db.query(RoutingPlan).filter(RoutingPlan.id == other_plan.id).first()
+
+
+def test_review_only_plans_are_hidden_from_routing_plans(client, db):
+    visible = RoutingPlan(
+        id="visible-plan",
+        user_id=TEST_USER_ID,
+        status="ready",
+        scope_json={},
+    )
+    ephemeral = RoutingPlan(
+        id="review-only-plan",
+        user_id=TEST_USER_ID,
+        status="draft",
+        scope_json={"review_only": True},
+    )
+    db.add_all([visible, ephemeral])
+    db.commit()
+
+    response = client.get("/api/routing/plans")
+
+    assert response.status_code == 200
+    assert [plan["id"] for plan in response.json()] == [visible.id]
+
+
+def test_review_only_items_do_not_count_as_routing_history(db):
+    review_asset = _make_asset(db, "review-only-history")
+    routed_asset = _make_asset(db, "normal-routing-history")
+    review_plan = RoutingPlan(
+        id="review-history-plan",
+        user_id=TEST_USER_ID,
+        status="ready",
+        scope_json={"review_only": True},
+    )
+    normal_plan = RoutingPlan(
+        id="normal-history-plan",
+        user_id=TEST_USER_ID,
+        status="ready",
+        scope_json={},
+    )
+    db.add_all([
+        review_plan,
+        normal_plan,
+        RoutingPlanItem(
+            id="review-history-item",
+            user_id=TEST_USER_ID,
+            plan_id=review_plan.id,
+            asset_id=review_asset.id,
+            status="pending",
+        ),
+        RoutingPlanItem(
+            id="normal-history-item",
+            user_id=TEST_USER_ID,
+            plan_id=normal_plan.id,
+            asset_id=routed_asset.id,
+            status="pending",
+        ),
+    ])
+    db.commit()
+
+    assets = _make_orchestrator(db)._load_assets(None, None)
+
+    asset_ids = {asset.id for asset in assets}
+    assert review_asset.id in asset_ids
+    assert routed_asset.id not in asset_ids
+
+
 def test_process_asset_stops_when_image_preparation_fails(db):
     orchestrator = _make_orchestrator(db)
     asset = _make_asset(db, "asset-without-thumbnail")
@@ -627,6 +724,39 @@ def test_classification_rolls_back_before_logging_asset_failure(db):
     assert orchestrator.run_classification_job("job-id") == "plan-id"
     db.rollback.assert_called_once()
     orchestrator.job_service.complete_job.assert_called_once()
+
+
+def test_review_only_classification_does_not_auto_apply(db):
+    _clean(db)
+    asset = _make_asset(db, "review-only-asset")
+    tree = RoutingTreeService(db, TEST_USER_ID)
+    bucket = tree.create_node(RoutingNodeCreate(name="Review"))
+    plan_svc = RoutingPlanService(db, TEST_USER_ID)
+    plan = plan_svc.create_plan()
+    item = plan_svc.add_item(
+        plan,
+        asset.id,
+        _make_decision(bucket.id, "Review", auto=True),
+        {},
+    )
+    assert item.status == "approved"
+
+    orchestrator = _make_orchestrator(db)
+    orchestrator.job_service = MagicMock()
+    orchestrator.tree_service.get_enabled_leaves = MagicMock(return_value=[bucket])
+    orchestrator._load_assets = MagicMock(return_value=[])
+    orchestrator._apply_auto_apply_items = MagicMock()
+
+    result = orchestrator.run_classification_job(
+        "job-id",
+        plan_id=plan.id,
+        review_only=True,
+    )
+
+    assert result == plan.id
+    db.refresh(item)
+    assert item.status == "pending"
+    orchestrator._apply_auto_apply_items.assert_not_called()
 
 
 def test_parallel_classification_respects_configured_concurrency(db):

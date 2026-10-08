@@ -23,6 +23,7 @@ vi.mock("../services/api", async (importOriginal) => {
     getSetupStatus: vi.fn().mockResolvedValue({ setup_required: false }),
     setupCreateAdmin: noop,
     getHealth: vi.fn().mockResolvedValue({ status: "ok" }),
+    getRuntimeSettings: vi.fn().mockResolvedValue({ timezone: "UTC" }),
     getImmichSettings: vi.fn().mockResolvedValue({ immich_url: "", connected: false }),
     testImmichConnection: noop,
     getProviders: vi.fn().mockResolvedValue([]),

@@ -46,6 +46,14 @@ def _make_provider(
 # GET /api/settings/immich
 # ---------------------------------------------------------------------------
 
+def test_get_runtime_settings_returns_configured_timezone(client):
+    with patch("app.config.settings.TZ", "America/Vancouver"):
+        response = client.get("/api/settings/runtime")
+
+    assert response.status_code == 200
+    assert response.json() == {"timezone": "America/Vancouver"}
+
+
 def test_get_immich_settings_not_configured(client):
     # No DB row and empty env vars → not configured
     with patch("app.routers.settings._get_immich_credentials", return_value=("", "")):

@@ -64,6 +64,7 @@ def enqueue_routing_classification(
     asset_ids: Optional[List[str]] = None,
     limit: Optional[int] = None,
     force: bool = False,
+    review_only: bool = False,
 ) -> Tuple[str, str]:
     """Create a routing-classification job + plan and enqueue the worker."""
     from ..services.job_progress import JobProgressService
@@ -73,23 +74,34 @@ def enqueue_routing_classification(
     job_svc = JobProgressService(db)
     job = job_svc.create_job(
         "routing_classification",
-        params={"asset_ids": asset_ids, "limit": limit, "force": force},
+        params={
+            "asset_ids": asset_ids,
+            "limit": limit,
+            "force": force,
+            "review_only": review_only,
+        },
         user_id=user_id,
     )
     plan = RoutingPlanService(db, user_id).create_plan(
         job_id=job.id,
-        scope={"asset_ids": asset_ids, "limit": limit, "force": force},
+        scope={
+            "asset_ids": asset_ids,
+            "limit": limit,
+            "force": force,
+            "review_only": review_only,
+        },
         status="draft",
     )
     job.params_json = {
         "asset_ids": asset_ids,
         "limit": limit,
         "force": force,
+        "review_only": review_only,
         "plan_id": plan.id,
     }
     db.commit()
     enqueue(
         run_routing_classification,
-        job.id, plan.id, asset_ids, limit, force, user_id,
+        job.id, plan.id, asset_ids, limit, force, user_id, review_only,
     )
     return job.id, plan.id

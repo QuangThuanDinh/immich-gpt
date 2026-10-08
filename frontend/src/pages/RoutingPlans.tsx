@@ -15,6 +15,7 @@ import AssetDetailPanel from "../components/AssetDetailPanel";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import masterDetail from "../styles/MasterDetail.module.css";
 import { CheckCircle2, AlertTriangle, Trash2, XCircle, Clock, ChevronLeft, type LucideIcon } from "lucide-react";
+import { useTimezone } from "../hooks/useTimezone";
 
 const GROUP_DEFS: {
   key: keyof RoutingPlanSummary["groups"];
@@ -32,6 +33,7 @@ const GROUP_DEFS: {
 
 export default function RoutingPlans() {
   const qc = useQueryClient();
+  const { formatDateTime } = useTimezone();
   const pageVisible = usePageVisible();
   const { data: plans = [] } = useQuery({ queryKey: ["routing-plans"], queryFn: () => listRoutingPlans() });
   const { data: routingNodes = [] } = useQuery({
@@ -123,7 +125,7 @@ export default function RoutingPlans() {
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <Clock size={12} color="#64748b" />
                 <span style={{ fontSize: 12, color: "#e2e8f0" }}>
-                  {new Date(p.created_at).toLocaleString()}
+                  {formatDateTime(p.created_at)}
                 </span>
               </div>
               <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>

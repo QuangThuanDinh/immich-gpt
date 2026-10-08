@@ -166,6 +166,7 @@ def run_routing_classification(
     limit: Optional[int] = None,
     force: bool = False,
     user_id: Optional[str] = None,
+    review_only: bool = False,
 ) -> dict:
     """Background task: classify assets against the user's routing tree."""
     db = SessionLocal()
@@ -183,7 +184,12 @@ def run_routing_classification(
                 processing_concurrency=get_processing_concurrency(db, user_id),
             )
             orch.run_classification_job(
-                job_id, asset_ids=asset_ids, limit=limit, force=force, plan_id=plan_id,
+                job_id,
+                asset_ids=asset_ids,
+                limit=limit,
+                force=force,
+                plan_id=plan_id,
+                review_only=review_only,
             )
         return {"status": "done"}
 

@@ -54,7 +54,28 @@ class RoutingPlanService:
         q = self.db.query(RoutingPlan).filter(RoutingPlan.user_id == self.user_id)
         if status:
             q = q.filter(RoutingPlan.status == status)
-        return q.order_by(RoutingPlan.created_at.desc()).all()
+        plans = q.order_by(RoutingPlan.created_at.desc()).all()
+        return [
+            plan
+            for plan in plans
+            if not (plan.scope_json or {}).get("review_only", False)
+        ]
+
+    def delete_plan(self, plan_id: str) -> bool:
+        plan = self.get_plan(plan_id)
+        if not plan:
+            return False
+        (
+            self.db.query(RoutingPlanItem)
+            .filter(
+                RoutingPlanItem.plan_id == plan_id,
+                RoutingPlanItem.user_id == self.user_id,
+            )
+            .delete(synchronize_session=False)
+        )
+        self.db.delete(plan)
+        self.db.commit()
+        return True
 
     def item_counts_by_plan(self, plan_ids: List[str]) -> Dict[str, int]:
         if not plan_ids:

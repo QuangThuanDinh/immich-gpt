@@ -11,6 +11,7 @@ import json
 import uuid
 from typing import Optional, List, Dict, Any
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..models.asset import Asset
@@ -91,6 +92,7 @@ class RoutingClassificationOrchestrator:
         limit: Optional[int] = None,
         force: bool = False,
         plan_id: Optional[str] = None,
+        review_only: bool = False,
     ) -> Optional[str]:
         self.job_service.start_job(job_id)
         self.job_service.update_progress(
@@ -115,7 +117,12 @@ class RoutingClassificationOrchestrator:
         else:
             plan = self.plan_service.create_plan(
                 job_id=job_id,
-                scope={"asset_ids": asset_ids, "limit": limit, "force": force},
+                scope={
+                    "asset_ids": asset_ids,
+                    "limit": limit,
+                    "force": force,
+                    "review_only": review_only,
+                },
                 status="draft",
             )
 
@@ -138,8 +145,13 @@ class RoutingClassificationOrchestrator:
         plan.status = "ready"
         self.db.commit()
 
-        # Auto-apply approved items immediately
-        self._apply_auto_apply_items(plan.id)
+        if review_only:
+            for item in self.plan_service.list_items(plan.id):
+                if item.status == "approved":
+                    item.status = "pending"
+            self.db.commit()
+        else:
+            self._apply_auto_apply_items(plan.id)
 
         self.job_service.complete_job(job_id, message=f"Routed {total} assets")
         return plan.id
@@ -583,10 +595,15 @@ class RoutingClassificationOrchestrator:
                 )
             )
         if not force:
+            review_only = RoutingPlan.scope_json["review_only"].as_boolean()
             q = q.filter(
                 ~Asset.id.in_(
-                    self.db.query(RoutingPlanItem.asset_id).filter(
+                    self.db.query(RoutingPlanItem.asset_id)
+                    .join(RoutingPlan, RoutingPlan.id == RoutingPlanItem.plan_id)
+                    .filter(
                         RoutingPlanItem.user_id == self.user_id,
+                        RoutingPlan.user_id == self.user_id,
+                        or_(review_only.is_(None), review_only.is_(False)),
                     )
                 )
             )

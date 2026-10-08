@@ -472,6 +472,15 @@ class AssetSyncService:
     _COMMIT_BATCH_SIZE = 100
     _DETAIL_FETCH_CONCURRENCY = 4
 
+    def refresh_asset(self, immich_id: str) -> str:
+        hydrated = self._hydrate_asset({"id": immich_id})
+        synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        _, _, asset_id = self._upsert_asset(hydrated, synced_at)
+        if not asset_id:
+            raise ValueError("Immich returned an asset without an ID")
+        self.db.commit()
+        return asset_id
+
     def _hydrate_asset(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         detailed = self.immich.get_asset(raw["id"])
         faces = self.immich.get_asset_faces(raw["id"])

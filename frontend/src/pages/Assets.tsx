@@ -176,7 +176,7 @@ export default function Assets() {
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search filename, description, location…"
+            placeholder="Search filename, Immich ID, description, location…"
             style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#e2e8f0", fontSize: 13 }}
           />
         </form>
@@ -241,6 +241,7 @@ export default function Assets() {
 
       {selectedAssetId && (
         <AssetDetailPanel
+          key={selectedAssetId}
           assetId={selectedAssetId}
           initialAsset={selected}
           onClose={() => setSelectedAssetId(null)}

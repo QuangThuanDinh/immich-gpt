@@ -148,6 +148,18 @@
     Mask="false"
   >gpt-4o</Config>
 
+  <Config
+    Name="Timezone"
+    Target="TZ"
+    Default="UTC"
+    Mode=""
+    Description="IANA timezone used for displayed timestamps and job log clocks. Example: America/Vancouver"
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"
+  >UTC</Config>
+
   <!-- ── Session security ───────────────────────────────────────────────── -->
   <Config
     Name="Secure Cookie (HTTPS)"

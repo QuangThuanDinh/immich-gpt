@@ -87,6 +87,21 @@ def test_list_assets_filter_by_type(client, db):
     assert data[0]["asset_type"] == "IMAGE"
 
 
+def test_asset_filters_support_immich_id(client, db):
+    matching = _make_asset(db, immich_id="de1dd085-a858-4ed4-89ad-f51027cbcca0")
+    _make_asset(db, immich_id="different-immich-id")
+    query = "a858-4ed4"
+
+    listed = client.get("/api/assets", params={"q": query})
+    counted = client.get("/api/assets/count", params={"q": query})
+    ids = client.get("/api/assets/ids", params={"q": query})
+
+    assert listed.status_code == 200
+    assert [asset["id"] for asset in listed.json()] == [matching.id]
+    assert counted.json() == {"count": 1}
+    assert ids.json() == {"ids": [matching.id]}
+
+
 def test_list_assets_server_side_sort_filename(client, db):
     _make_named_asset(db, "bravo.jpg", datetime(2024, 1, 1))
     _make_named_asset(db, "alpha.jpg", datetime(2024, 1, 2))
@@ -182,3 +197,77 @@ def test_get_asset_optional_fields(client, db):
     }]
     assert data["faces"][0]["person_name"] == "Kelly"
     assert data["faces"][0]["bounding_box_x1"] == 10
+
+
+def test_refresh_asset_metadata_from_immich(client, db, monkeypatch):
+    asset = _make_asset(db, immich_id="immich-photo")
+    asset.people_json = None
+    asset.faces_json = None
+    asset.raw_metadata_json = {"id": "immich-photo", "updatedAt": "2026-01-01T00:00:00Z"}
+    db.commit()
+
+    class FakeImmichClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def get_asset(self, asset_id):
+            assert asset_id == "immich-photo"
+            return {
+                "id": asset_id,
+                "type": "IMAGE",
+                "originalFileName": "photo.jpg",
+                "originalMimeType": "image/jpeg",
+                "updatedAt": "2026-10-07T12:00:00Z",
+                "tags": [{"name": "family"}],
+                "people": [{
+                    "id": "person-1",
+                    "name": "Kelly",
+                    "isHidden": False,
+                    "isFavorite": True,
+                }],
+            }
+
+        def get_asset_faces(self, asset_id):
+            assert asset_id == "immich-photo"
+            return [{
+                "id": "face-1",
+                "boundingBoxX1": 10,
+                "boundingBoxY1": 20,
+                "boundingBoxX2": 110,
+                "boundingBoxY2": 140,
+                "imageWidth": 1920,
+                "imageHeight": 1440,
+                "sourceType": "machine-learning",
+                "person": {"id": "person-1", "name": "Kelly"},
+            }]
+
+        def is_external_library_asset(self, raw):
+            return False
+
+    monkeypatch.setattr(
+        "app.routers.assets._get_user_immich_client",
+        lambda *args: FakeImmichClient(),
+    )
+
+    response = client.post(f"/api/assets/{asset.id}/refresh")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tags"] == ["family"]
+    assert data["people"][0]["name"] == "Kelly"
+    assert data["faces"][0]["person_name"] == "Kelly"
+    assert data["synced_at"] is not None
+
+    db.refresh(asset)
+    assert asset.raw_metadata_json["updatedAt"] == "2026-10-07T12:00:00Z"
+    assert asset.people_json[0]["name"] == "Kelly"
+    assert asset.faces_json[0]["person_name"] == "Kelly"
+
+
+def test_refresh_asset_metadata_not_found(client):
+    response = client.post("/api/assets/nonexistent-id/refresh")
+
+    assert response.status_code == 404

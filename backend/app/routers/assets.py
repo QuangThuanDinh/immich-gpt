@@ -1,12 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
+from httpx import TransportError
 from sqlalchemy.orm import Session
 from sqlalchemy import asc, desc, or_
 from typing import List, Optional
 
+from ..config import settings
 from ..database import get_db
 from ..dependencies import require_active_user
+from ..models.app_setting import AppSetting
 from ..models.asset import Asset
 from ..schemas.asset import AssetOut
+from ..services.asset_sync import AssetSyncService
+from ..services.immich_client import ImmichClient, ImmichError
+from ..services.secret_store import decrypt_secret
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
 
@@ -40,6 +46,21 @@ def _user_asset_query(db: Session, user_id: str):
     return db.query(Asset).filter(Asset.user_id == user_id)
 
 
+def _get_user_immich_client(db: Session, user_id: str) -> ImmichClient:
+    url_row = db.query(AppSetting).filter(
+        AppSetting.user_id == user_id,
+        AppSetting.key == "immich_url",
+    ).first()
+    key_row = db.query(AppSetting).filter(
+        AppSetting.user_id == user_id,
+        AppSetting.key == "immich_api_key",
+    ).first()
+    url = (url_row.value if url_row and url_row.value else None) or settings.IMMICH_URL
+    stored_key = key_row.value if key_row and key_row.value else None
+    api_key = decrypt_secret(stored_key) if stored_key else settings.IMMICH_API_KEY
+    return ImmichClient(url, api_key)
+
+
 def _apply_asset_filters(query, asset_type: Optional[str], q: Optional[str]):
     if asset_type:
         query = query.filter(Asset.asset_type == asset_type)
@@ -47,6 +68,7 @@ def _apply_asset_filters(query, asset_type: Optional[str], q: Optional[str]):
         like = f"%{q}%"
         query = query.filter(
             or_(
+                Asset.immich_id.ilike(like),
                 Asset.original_filename.ilike(like),
                 Asset.description.ilike(like),
                 Asset.city.ilike(like),
@@ -131,3 +153,39 @@ def get_asset(
     if not a:
         raise HTTPException(status_code=404, detail="Asset not found")
     return _to_out(a)
+
+
+@router.post("/{asset_id}/refresh", response_model=AssetOut)
+def refresh_asset(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.user_id == current_user.id,
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    try:
+        with _get_user_immich_client(db, current_user.id) as immich:
+            refreshed_id = AssetSyncService(
+                db,
+                immich,
+                user_id=current_user.id,
+            ).refresh_asset(asset.immich_id)
+    except (ImmichError, TransportError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not refresh asset metadata from Immich: {exc}",
+        ) from exc
+
+    refreshed = db.query(Asset).filter(
+        Asset.id == refreshed_id,
+        Asset.user_id == current_user.id,
+    ).first()
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="Refreshed asset was not saved")
+    return _to_out(refreshed)

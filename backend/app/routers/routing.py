@@ -350,6 +350,7 @@ def classify(
         asset_ids=body.asset_ids,
         limit=body.limit,
         force=body.force,
+        review_only=body.review_only,
     )
     return {"job_id": job_id, "plan_id": plan_id, "status": "queued"}
 
@@ -395,6 +396,17 @@ def get_plan(
         raise HTTPException(status_code=404, detail="Plan not found")
     items = svc.list_items(plan_id)
     return _plan_to_out(plan, len(items))
+
+
+@router.delete("/plans/{plan_id}")
+def delete_plan(
+    plan_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    if not RoutingPlanService(db, current_user.id).delete_plan(plan_id):
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return {"deleted": True}
 
 
 @router.get("/plans/{plan_id}/summary")

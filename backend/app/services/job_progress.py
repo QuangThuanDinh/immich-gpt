@@ -5,10 +5,18 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterator, Optional, List
+from zoneinfo import ZoneInfo
 
+from ..config import settings
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _log_timestamp() -> str:
+    return datetime.now(ZoneInfo(settings.TZ)).strftime("%H:%M:%S")
+
+
 from sqlalchemy.orm import Session
 from ..models.job_run import JobRun
 
@@ -107,7 +115,7 @@ class JobProgressService:
             )
         if log_line:
             lines = list(job.log_lines_json or [])
-            ts = _now().strftime("%H:%M:%S")
+            ts = _log_timestamp()
             lines.append(f"[{ts}] {log_line}")
             # Keep last 500 lines
             job.log_lines_json = lines[-500:]
@@ -153,7 +161,7 @@ class JobProgressService:
         job.current_step = None
         # Preserve log history — append a separator line
         lines = list(job.log_lines_json or [])
-        lines.append(f"[{_now().strftime('%H:%M:%S')}] --- retrying ---")
+        lines.append(f"[{_log_timestamp()}] --- retrying ---")
         job.log_lines_json = lines[-500:]
         self.db.commit()
 
