@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from typing import Optional, List, Literal
 from datetime import datetime
 
@@ -37,11 +37,19 @@ class SyncJobRequest(BaseModel):
       - "favorites" – only assets marked as favourite
       - "albums"    – only assets belonging to the albums listed in album_ids
 
-    Incremental sync is the default. Set full_sync to rehydrate every asset in
-    the selected scope.
+    Normal incremental sync is the default. Set quick_sync to fetch only assets
+    uploaded since the last successful scan, or full_sync to rehydrate every
+    asset in the selected scope.
     """
 
     scope: Literal["all", "favorites", "albums"] = "all"
     album_ids: Optional[List[str]] = None
     run_routing_after: bool = False
+    quick_sync: bool = False
     full_sync: bool = False
+
+    @model_validator(mode="after")
+    def validate_sync_mode(self):
+        if self.quick_sync and self.full_sync:
+            raise ValueError("quick_sync and full_sync cannot both be enabled")
+        return self

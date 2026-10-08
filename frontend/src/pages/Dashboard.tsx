@@ -7,7 +7,7 @@ import {
   listRoutingPlans, listRoutingNodes,
 } from "../services/api";
 import type {
-  SyncScope, ImmichAlbum, RoutingNode, RoutingPlan, JobRun,
+  SyncMode, SyncScope, ImmichAlbum, RoutingNode, RoutingPlan, JobRun,
 } from "../types";
 import JobProgressBar from "../components/JobProgressBar";
 import JobDetail from "../components/JobDetail";
@@ -51,7 +51,7 @@ function WorkflowPanel({
     scope: SyncScope,
     albumIds: string[] | undefined,
     runRoutingAfter: boolean,
-    fullSync: boolean,
+    syncMode: SyncMode,
   ) => void;
   onRoute: (force: boolean) => void;
   isLoading: boolean;
@@ -90,7 +90,7 @@ function WorkflowPanel({
     {
       value: "sync_route",
       label: "Sync + Route",
-      desc: "Pull new or changed assets, then route only newly added photos.",
+      desc: "Quick Sync newly uploaded assets, then route only those new photos.",
       icon: <Layers size={14} />,
     },
     {
@@ -101,7 +101,7 @@ function WorkflowPanel({
     },
   ];
 
-  function handleRun(fullSync = false) {
+  function handleRun(syncMode: SyncMode = "normal") {
     if (workflowMode === "route") {
       onRoute(false);
     } else {
@@ -109,7 +109,7 @@ function WorkflowPanel({
         scope,
         scope === "albums" ? Array.from(selectedAlbumIds) : undefined,
         workflowMode === "sync_route",
-        fullSync,
+        syncMode,
       );
     }
   }
@@ -214,13 +214,13 @@ function WorkflowPanel({
         />
       ) : workflowMode === "sync" ? (
         <RunSyncButton
-          label={isLoading ? "Starting…" : "Start Sync"}
+          label={isLoading ? "Starting…" : "Quick Sync"}
           pending={!canRun}
           onRun={handleRun}
         />
       ) : (
           <button
-            onClick={() => handleRun(false)}
+            onClick={() => handleRun("quick")}
             disabled={!canRun}
             className={[styles.scopeBtn, canRun ? styles.scopeBtnActive : styles.scopeBtnInactive].join(" ")}
             style={{ padding: "9px 20px" }}
@@ -290,13 +290,14 @@ export default function Dashboard() {
       scope: SyncScope;
       album_ids?: string[];
       runRoutingAfter: boolean;
-      fullSync: boolean;
+      syncMode: SyncMode;
     }) =>
       startSyncJob({
         scope: params.scope,
         album_ids: params.album_ids,
         run_routing_after: params.runRoutingAfter,
-        full_sync: params.fullSync,
+        quick_sync: params.syncMode === "quick",
+        full_sync: params.syncMode === "full",
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -363,12 +364,12 @@ export default function Dashboard() {
       </div>
 
       <WorkflowPanel
-        onSync={(scope, albumIds, runRoutingAfter, fullSync) =>
+        onSync={(scope, albumIds, runRoutingAfter, syncMode) =>
           syncMutation.mutate({
             scope,
             album_ids: albumIds,
             runRoutingAfter,
-            fullSync,
+            syncMode,
           })
         }
         onRoute={(force) => routeMutation.mutate(force)}

@@ -13,10 +13,12 @@ class _PagedImmich:
         self.details = details or {}
         self.faces = faces or {}
         self.trashed_calls = []
+        self.list_calls = []
         self.detail_calls = []
         self.face_calls = []
 
     def list_assets(self, page=1, page_size=100, **kwargs):
+        self.list_calls.append((page, page_size, kwargs))
         return self.pages.get(page, [])
 
     def list_trashed_assets(self, page=1, page_size=100):
@@ -193,6 +195,38 @@ def test_incremental_sync_hydrates_changed_asset(db):
     assert immich.detail_calls == ["photo"]
     assert immich.face_calls == ["photo"]
     assert asset.tags_json == ["updated"]
+
+
+def test_quick_sync_uses_upload_window_without_scanning_trash(db):
+    new_asset = _raw_asset(
+        "new-photo",
+        "IMAGE",
+        createdAt="2026-10-08T18:00:00Z",
+    )
+    immich = _PagedImmich(
+        {1: [new_asset]},
+        details={"new-photo": {**new_asset, "tags": [], "people": []}},
+    )
+    service = AssetSyncService(db, immich, user_id=TEST_USER_ID)
+
+    result = service.sync_all(
+        page_size=10,
+        quick_sync=True,
+        created_after="2026-10-08T17:00:00Z",
+        created_before="2026-10-08T19:00:00Z",
+    )
+
+    assert result["created"] == 1
+    assert result["scan_completed"] is True
+    assert immich.trashed_calls == []
+    assert immich.list_calls == [(
+        1,
+        10,
+        {
+            "created_after": "2026-10-08T17:00:00Z",
+            "created_before": "2026-10-08T19:00:00Z",
+        },
+    )]
 
 
 def test_full_sync_hydrates_unchanged_asset(db):

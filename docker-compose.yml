@@ -22,7 +22,7 @@
 services:
 
   app:
-    image: ${IMMICH_GPT_IMAGE:-ghcr.io/quangthuandinh/immich-gpt:0.6.25}
+    image: ${IMMICH_GPT_IMAGE:-ghcr.io/quangthuandinh/immich-gpt:0.6.26}
     # `docker compose build` requires Docker Buildx >= 0.17.
     # On older Unraid / distro Docker installs, build locally with:
     #   ./build.sh

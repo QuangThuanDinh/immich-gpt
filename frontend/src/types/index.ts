@@ -81,11 +81,13 @@ export interface ImmichSettings {
 }
 
 export type SyncScope = "all" | "favorites" | "albums";
+export type SyncMode = "quick" | "normal" | "full";
 
 export interface SyncJobRequest {
   scope: SyncScope;
   album_ids?: string[];
   run_routing_after?: boolean;
+  quick_sync?: boolean;
   full_sync?: boolean;
 }
 

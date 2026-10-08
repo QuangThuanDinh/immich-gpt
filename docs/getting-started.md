@@ -160,9 +160,21 @@ Go to **Dashboard** and choose:
 Recommended first run:
 
 1. choose **Favourites Only** or **Specific Albums**
-2. choose **Sync + Route**
-3. wait for the job to complete
-4. review the resulting routing plan carefully
+2. run a Normal Sync once to establish the local library and Quick Sync cursor
+3. choose **Sync + Route** for subsequent newly uploaded assets
+4. wait for the job to complete
+5. review the resulting routing plan carefully
+
+The primary **Quick Sync** button fetches recent uploads. Its menu provides the
+other two levels:
+
+- **Quick Sync** fetches only assets uploaded since the last successful scan.
+- **Normal Sync** checks the complete lightweight inventory and hydrates new,
+  changed, failed, or incomplete assets.
+- **Full Sync** rehydrates detailed metadata for every selected asset.
+
+**Sync + Route** always uses Quick Sync and routes only the newly created local
+assets returned by that scan.
 
 ## Review and apply
 

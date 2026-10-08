@@ -207,6 +207,39 @@ def test_context_manager_reuses_single_http_client():
     mock_http.close.assert_called_once()
 
 
+def test_list_assets_uses_created_window_for_quick_sync():
+    client = ImmichClient("http://immich.local", "key")
+    mock_http = MagicMock()
+    mock_http.__enter__ = lambda self: self
+    mock_http.__exit__ = MagicMock(return_value=False)
+    mock_http.post.return_value = make_mock_response(
+        200,
+        {"assets": {"items": [{"id": "new-asset"}]}},
+    )
+
+    with patch.object(client, "_client", return_value=mock_http):
+        result = client.list_assets(
+            page=1,
+            page_size=25,
+            created_after="2026-10-08T17:55:00Z",
+            created_before="2026-10-08T19:00:00Z",
+        )
+
+    assert result == [{"id": "new-asset"}]
+    mock_http.post.assert_called_once_with(
+        "/api/search/metadata",
+        json={
+            "page": 1,
+            "size": 25,
+            "withExif": True,
+            "withArchived": True,
+            "createdAfter": "2026-10-08T17:55:00Z",
+            "order": "asc",
+            "createdBefore": "2026-10-08T19:00:00Z",
+        },
+    )
+
+
 def test_list_album_assets_caches_full_album_payload():
     client = ImmichClient("http://immich.local", "key")
     mock_http = MagicMock()

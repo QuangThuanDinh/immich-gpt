@@ -166,9 +166,9 @@ def test_start_sync_job_persists_route_after_sync(client, db):
     assert r.status_code == 200
     job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
     assert job.params_json["run_routing_after"] is True
+    assert job.params_json["quick_sync"] is False
     assert job.params_json["full_sync"] is False
-    assert mock_enqueue.call_args.args[-2] is True
-    assert mock_enqueue.call_args.args[-1] is False
+    assert mock_enqueue.call_args.args[-3:] == (True, False, False)
 
 
 def test_start_sync_job_persists_full_sync(client, db):
@@ -178,7 +178,27 @@ def test_start_sync_job_persists_full_sync(client, db):
     assert r.status_code == 200
     job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
     assert job.params_json["full_sync"] is True
-    assert mock_enqueue.call_args.args[-1] is True
+    assert mock_enqueue.call_args.args[-2:] == (True, False)
+
+
+def test_start_sync_job_persists_quick_sync(client, db):
+    with patch("app.routers.jobs._enqueue") as mock_enqueue:
+        r = client.post("/api/jobs/sync", json={"scope": "all", "quick_sync": True})
+
+    assert r.status_code == 200
+    job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
+    assert job.params_json["quick_sync"] is True
+    assert job.params_json["full_sync"] is False
+    assert mock_enqueue.call_args.args[-2:] == (False, True)
+
+
+def test_start_sync_job_rejects_conflicting_modes(client):
+    r = client.post(
+        "/api/jobs/sync",
+        json={"scope": "all", "quick_sync": True, "full_sync": True},
+    )
+
+    assert r.status_code == 422
 
 
 def test_run_asset_sync_enqueues_routing_after_success(db, monkeypatch):
@@ -228,6 +248,190 @@ def test_run_asset_sync_enqueues_routing_after_success(db, monkeypatch):
     assert enqueued[0][1]["user_id"] == TEST_USER_ID
     assert enqueued[0][1]["asset_ids"] == ["new-local-id"]
     assert enqueued[0][1]["force"] is False
+
+
+def test_quick_sync_uses_cursor_overlap_and_routes_new_assets(db, monkeypatch):
+    from app.models.app_setting import AppSetting
+    from app.services.job_progress import JobProgressService
+    from app.workers.tasks import run_asset_sync
+    from tests.conftest import TEST_USER_ID
+
+    job = JobProgressService(db).create_job(
+        "asset_sync",
+        params={
+            "scope": "all",
+            "run_routing_after": True,
+            "quick_sync": True,
+        },
+        user_id=TEST_USER_ID,
+    )
+    cursor = AppSetting(
+        id=str(uuid.uuid4()),
+        user_id=TEST_USER_ID,
+        key="quick_sync_cursor:all",
+        value="2026-10-08T18:00:00Z",
+    )
+    db.add(cursor)
+    db.commit()
+    cursor_id = cursor.id
+    sync_kwargs = {}
+    enqueued = []
+
+    class FakeAssetSyncService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def sync_all(self, **kwargs):
+            sync_kwargs.update(kwargs)
+            return {
+                "synced": 1,
+                "created": 1,
+                "updated": 0,
+                "unchanged": 0,
+                "errors": 0,
+                "scan_completed": True,
+                "created_asset_ids": ["new-local-id"],
+            }
+
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        "app.workers.tasks._get_user_immich_client",
+        lambda *args: object(),
+    )
+    monkeypatch.setattr(
+        "app.workers.tasks.AssetSyncService",
+        FakeAssetSyncService,
+    )
+    monkeypatch.setattr(
+        "app.workers.executor.enqueue_routing_classification",
+        lambda *args, **kwargs: enqueued.append((args, kwargs)),
+    )
+
+    run_asset_sync(
+        job.id,
+        user_id=TEST_USER_ID,
+        run_routing_after=True,
+        quick_sync=True,
+    )
+
+    assert sync_kwargs["quick_sync"] is True
+    assert sync_kwargs["created_after"] == "2026-10-08T17:55:00Z"
+    assert sync_kwargs["created_before"] is not None
+    assert enqueued[0][1]["asset_ids"] == ["new-local-id"]
+    refreshed_cursor = db.query(AppSetting).filter(
+        AppSetting.id == cursor_id
+    ).one()
+    assert refreshed_cursor.value > "2026-10-08T18:00:00Z"
+
+
+def test_sync_cursor_never_moves_backwards(db):
+    from datetime import datetime, timezone
+
+    from app.models.app_setting import AppSetting
+    from app.workers.tasks import _set_sync_cursor
+    from tests.conftest import TEST_USER_ID
+
+    _set_sync_cursor(
+        db,
+        TEST_USER_ID,
+        "all",
+        None,
+        datetime(2026, 10, 8, 20, 0, tzinfo=timezone.utc),
+    )
+    _set_sync_cursor(
+        db,
+        TEST_USER_ID,
+        "all",
+        None,
+        datetime(2026, 10, 8, 19, 0, tzinfo=timezone.utc),
+    )
+
+    cursor = db.query(AppSetting).filter(
+        AppSetting.user_id == TEST_USER_ID,
+        AppSetting.key == "quick_sync_cursor:all",
+    ).one()
+    assert cursor.value == "2026-10-08T20:00:00Z"
+
+
+def test_resumed_quick_sync_routes_assets_created_before_pause(db, monkeypatch):
+    from app.services.job_progress import JobProgressService
+    from app.workers.tasks import run_asset_sync
+    from tests.conftest import TEST_USER_ID
+
+    job = JobProgressService(db).create_job(
+        "asset_sync",
+        params={
+            "scope": "all",
+            "run_routing_after": True,
+            "quick_sync": True,
+        },
+        user_id=TEST_USER_ID,
+    )
+    job_id = job.id
+    calls = 0
+    enqueued = []
+
+    class FakeAssetSyncService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def sync_all(self, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                current = db.query(JobRun).filter(JobRun.id == job_id).one()
+                current.status = "paused"
+                db.commit()
+                created_ids = ["created-before-pause"]
+                completed = False
+            else:
+                created_ids = []
+                completed = True
+            return {
+                "synced": len(created_ids),
+                "created": len(created_ids),
+                "updated": 0,
+                "unchanged": 0,
+                "errors": 0,
+                "scan_completed": completed,
+                "created_asset_ids": created_ids,
+            }
+
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        "app.workers.tasks._get_user_immich_client",
+        lambda *args: object(),
+    )
+    monkeypatch.setattr(
+        "app.workers.tasks.AssetSyncService",
+        FakeAssetSyncService,
+    )
+    monkeypatch.setattr(
+        "app.workers.executor.enqueue_routing_classification",
+        lambda *args, **kwargs: enqueued.append((args, kwargs)),
+    )
+
+    run_asset_sync(
+        job_id,
+        user_id=TEST_USER_ID,
+        run_routing_after=True,
+        quick_sync=True,
+    )
+    paused = db.query(JobRun).filter(JobRun.id == job_id).one()
+    assert paused.status == "paused"
+    assert paused.params_json["created_asset_ids"] == ["created-before-pause"]
+    assert enqueued == []
+
+    paused.status = "queued"
+    db.commit()
+    run_asset_sync(
+        job_id,
+        user_id=TEST_USER_ID,
+        run_routing_after=True,
+        quick_sync=True,
+    )
+
+    assert enqueued[0][1]["asset_ids"] == ["created-before-pause"]
 
 
 def test_run_asset_sync_does_not_enqueue_routing_when_paused(db, monkeypatch):

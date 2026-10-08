@@ -40,17 +40,26 @@ class AssetSyncService:
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
         full_sync: bool = False,
+        quick_sync: bool = False,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Sync all assets from Immich."""
         excluded_motion_ids, trash_lookup_completed, preparation_errors = (
-            self._prepare_motion_exclusions(
+            self._prepare_sync_motion_exclusions(
                 page_size,
                 should_stop,
                 job_progress_callback,
+                quick_sync,
             )
         )
         result, completed, created_ids, updated_ids = self._sync_paged(
-            fetch_fn=lambda page: self.immich.list_assets(page=page, page_size=page_size),
+            fetch_fn=lambda page: self.immich.list_assets(
+                page=page,
+                page_size=page_size,
+                created_after=created_after,
+                created_before=created_before,
+            ),
             job_progress_callback=job_progress_callback,
             page_size=page_size,
             should_stop=should_stop,
@@ -88,18 +97,26 @@ class AssetSyncService:
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
         full_sync: bool = False,
+        quick_sync: bool = False,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Sync only favorited assets from Immich."""
         excluded_motion_ids, trash_lookup_completed, preparation_errors = (
-            self._prepare_motion_exclusions(
+            self._prepare_sync_motion_exclusions(
                 page_size,
                 should_stop,
                 job_progress_callback,
+                quick_sync,
             )
         )
         result, completed, created_ids, updated_ids = self._sync_paged(
             fetch_fn=lambda page: self.immich.list_assets(
-                page=page, page_size=page_size, is_favorite=True
+                page=page,
+                page_size=page_size,
+                is_favorite=True,
+                created_after=created_after,
+                created_before=created_before,
             ),
             job_progress_callback=job_progress_callback,
             page_size=page_size,
@@ -128,18 +145,32 @@ class AssetSyncService:
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
         full_sync: bool = False,
+        quick_sync: bool = False,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Sync assets from a specific album."""
         excluded_motion_ids, trash_lookup_completed, preparation_errors = (
-            self._prepare_motion_exclusions(
+            self._prepare_sync_motion_exclusions(
                 page_size,
                 should_stop,
                 job_progress_callback,
+                quick_sync,
             )
         )
         result, completed, created_ids, updated_ids = self._sync_paged(
             fetch_fn=lambda page: self.immich.list_album_assets(
-                album_id=album_id, page=page, page_size=page_size
+                album_id=album_id,
+                page=page,
+                page_size=page_size,
+                **(
+                    {
+                        "created_after": created_after,
+                        "created_before": created_before,
+                    }
+                    if created_after or created_before
+                    else {}
+                ),
             ),
             job_progress_callback=job_progress_callback,
             page_size=page_size,
@@ -168,6 +199,9 @@ class AssetSyncService:
         page_size: int = 100,
         should_stop: Optional[Callable[[], bool]] = None,
         full_sync: bool = False,
+        quick_sync: bool = False,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Sync assets from multiple albums."""
         total_created = total_updated = total_unchanged = total_errors = 0
@@ -176,10 +210,11 @@ class AssetSyncService:
         updated_ids: Set[str] = set()
         completed = True
         excluded_motion_ids, trash_lookup_completed, preparation_errors = (
-            self._prepare_motion_exclusions(
+            self._prepare_sync_motion_exclusions(
                 page_size,
                 should_stop,
                 job_progress_callback,
+                quick_sync,
             )
         )
         total_errors += preparation_errors
@@ -198,6 +233,14 @@ class AssetSyncService:
                             album_id=current_album_id,
                             page=page,
                             page_size=page_size,
+                            **(
+                                {
+                                    "created_after": created_after,
+                                    "created_before": created_before,
+                                }
+                                if created_after or created_before
+                                else {}
+                            ),
                         )
                     ),
                     job_progress_callback=job_progress_callback,
@@ -267,7 +310,23 @@ class AssetSyncService:
         result["synced_asset_ids"] = sorted(
             (created_ids | updated_ids) - filtered_ids
         )
+        result["scan_completed"] = completed
         return result
+
+    def _prepare_sync_motion_exclusions(
+        self,
+        page_size: int,
+        should_stop: Optional[Callable[[], bool]],
+        job_progress_callback=None,
+        quick_sync: bool = False,
+    ) -> Tuple[Set[str], bool, int]:
+        if quick_sync:
+            return self._known_live_photo_motion_ids(), True, 0
+        return self._prepare_motion_exclusions(
+            page_size,
+            should_stop,
+            job_progress_callback,
+        )
 
     def _prepare_motion_exclusions(
         self,

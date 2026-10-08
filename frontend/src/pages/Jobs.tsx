@@ -10,6 +10,7 @@ import JobDetail from "../components/JobDetail";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import RunRoutingButton from "../components/RunRoutingButton";
 import RunSyncButton from "../components/RunSyncButton";
+import type { SyncMode } from "../types";
 import { XCircle, ChevronDown, ChevronUp, Pause, RotateCcw, Trash2 } from "lucide-react";
 import styles from "./Jobs.module.css";
 
@@ -36,9 +37,10 @@ export default function Jobs() {
   const hasActiveJob = jobs.some((job) => ACTIVE.has(job.status) || job.status === "paused");
 
   const syncMut = useMutation({
-    mutationFn: (fullSync: boolean) => startSyncJob({
+    mutationFn: (mode: SyncMode) => startSyncJob({
       scope: "all",
-      full_sync: fullSync,
+      quick_sync: mode === "quick",
+      full_sync: mode === "full",
     }),
     onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["jobs"] }); setExpandedJobId(d.job_id); },
   });
@@ -68,7 +70,7 @@ export default function Jobs() {
         </div>
         <div className={styles.actions}>
           <RunSyncButton
-            label="Start Sync"
+            label="Quick Sync"
             pending={syncMut.isPending || hasActiveJob}
             onRun={(fullSync) => syncMut.mutate(fullSync)}
           />

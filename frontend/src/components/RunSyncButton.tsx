@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, RefreshCw, RotateCcw } from "lucide-react";
+import type { SyncMode } from "../types";
 import styles from "./RunRoutingButton.module.css";
 
 interface RunSyncButtonProps {
   label: string;
   pending: boolean;
-  onRun: (fullSync: boolean) => void;
+  onRun: (mode: SyncMode) => void;
 }
 
 export default function RunSyncButton({
@@ -76,7 +77,7 @@ export default function RunSyncButton({
     <div ref={containerRef} className={styles.container}>
       <button
         type="button"
-        onClick={() => onRun(false)}
+        onClick={() => onRun("quick")}
         disabled={pending}
         style={{
           ...buttonStyle,
@@ -124,7 +125,38 @@ export default function RunSyncButton({
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              onRun(true);
+              onRun("normal");
+            }}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              padding: "9px 10px",
+              border: "none",
+              borderRadius: 6,
+              background: "transparent",
+              color: "#e2e8f0",
+              textAlign: "left",
+              cursor: "pointer",
+            }}
+          >
+            <RefreshCw size={14} style={{ marginTop: 2, flexShrink: 0 }} />
+            <span>
+              <span style={{ display: "block", fontSize: 12, fontWeight: 600 }}>
+                Normal Sync
+              </span>
+              <span style={{ display: "block", marginTop: 2, color: "#64748b", fontSize: 10 }}>
+                Check all assets and hydrate new, changed, failed, or incomplete metadata.
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onRun("full");
             }}
             style={{
               width: "100%",

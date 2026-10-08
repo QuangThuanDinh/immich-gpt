@@ -21,8 +21,8 @@ Compared with the original project, this fork includes:
 - [x] Authoritative Immich tag, people, and face-region synchronization with secure person thumbnails
 - [x] Face-aware natural captions that use trusted Immich identities without asking the AI to recognize people
 - [x] Identity-caption validation with one corrective retry and privacy-conscious job logs
-- [x] Incremental sync for new, changed, failed, or incomplete assets plus an explicit Full Sync option
-- [x] New-only Sync + Route behavior that avoids reprocessing previously routed assets
+- [x] Quick, Normal, and Full sync modes for efficient uploads, reconciliation, and complete rehydration
+- [x] Quick Sync + Route behavior that fetches and routes only newly uploaded assets
 - [x] Pre-hydration Live Photo companion filtering to avoid repeated detail and face requests
 
 ## Key highlights
@@ -180,7 +180,11 @@ Then choose a workflow:
 - **Sync + Route**
 - **Route Only**
 
-For a first run, **Sync + Route** is usually the easiest option.
+**Quick Sync** is the default sync action and fetches uploads since the last
+successful scan. Its menu offers Normal Sync for complete inventory
+reconciliation and Full Sync for complete metadata rehydration. **Sync + Route**
+also uses Quick Sync. For a first run, use Normal or Full Sync once before
+relying on Quick Sync.
 
 ### 4. Review and apply a routing plan
 

@@ -4,6 +4,7 @@ All Immich HTTP calls are isolated here.
 """
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Optional, List, Dict, Any, Iterator
 
 import httpx
@@ -116,6 +117,8 @@ class ImmichClient:
         is_archived: Optional[bool] = None,
         with_deleted: Optional[bool] = None,
         trashed_after: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List assets with pagination.
 
@@ -139,6 +142,11 @@ class ImmichClient:
             body["withDeleted"] = with_deleted
         if trashed_after is not None:
             body["trashedAfter"] = trashed_after
+        if created_after is not None:
+            body["createdAfter"] = created_after
+            body["order"] = "asc"
+        if created_before is not None:
+            body["createdBefore"] = created_before
 
         with self._client_context() as client:
             # Try POST /api/search/metadata (v1.106–v1.117)
@@ -147,6 +155,11 @@ class ImmichClient:
                 # Try POST /api/search/assets (v1.118+)
                 r = client.post("/api/search/assets", json=body)
             if r.status_code == 404:
+                if created_after is not None or created_before is not None:
+                    raise ImmichError(
+                        "Quick Sync requires an Immich version with the asset search API",
+                        404,
+                    )
                 # Fall back to legacy GET /api/assets (pre-v1.106)
                 params: Dict[str, Any] = {"page": page, "size": page_size, "withExif": True}
                 if asset_type:
@@ -192,6 +205,8 @@ class ImmichClient:
         album_id: str,
         page: int = 1,
         page_size: int = 100,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List assets in a specific album with pagination."""
         assets = self._album_assets_cache.get(album_id)
@@ -203,6 +218,34 @@ class ImmichClient:
                 data = r.json()
                 assets = data.get("assets", [])
                 self._album_assets_cache[album_id] = assets
+        if created_after is not None or created_before is not None:
+            lower = (
+                datetime.fromisoformat(created_after.replace("Z", "+00:00"))
+                if created_after
+                else None
+            )
+            upper = (
+                datetime.fromisoformat(created_before.replace("Z", "+00:00"))
+                if created_before
+                else None
+            )
+            filtered_assets = []
+            for asset in assets:
+                created_at = asset.get("createdAt")
+                if not created_at:
+                    continue
+                try:
+                    created = datetime.fromisoformat(
+                        str(created_at).replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    continue
+                if lower is not None and created <= lower:
+                    continue
+                if upper is not None and created > upper:
+                    continue
+                filtered_assets.append(asset)
+            assets = filtered_assets
         # Immich's album endpoint returns the album assets in one payload; cache it
         # for this client instance so sync pagination does not redownload it.
         start = (page - 1) * page_size

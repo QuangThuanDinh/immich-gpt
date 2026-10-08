@@ -71,6 +71,7 @@ describe("Dashboard workflow", () => {
         scope: "all",
         album_ids: undefined,
         run_routing_after: true,
+        quick_sync: true,
         full_sync: false,
       });
     });
@@ -81,7 +82,7 @@ describe("Dashboard workflow", () => {
     renderDashboard();
 
     fireEvent.click(await screen.findByRole("button", { name: "Sync Only" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start Sync options" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quick Sync options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Full Sync/i }));
 
     await waitFor(() => {
@@ -89,7 +90,43 @@ describe("Dashboard workflow", () => {
         scope: "all",
         album_ids: undefined,
         run_routing_after: false,
+        quick_sync: false,
         full_sync: true,
+      });
+    });
+  });
+
+  it("starts Quick Sync from the primary sync action", async () => {
+    renderDashboard();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sync Only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quick Sync" }));
+
+    await waitFor(() => {
+      expect(mocks.startSyncJob).toHaveBeenCalledWith({
+        scope: "all",
+        album_ids: undefined,
+        run_routing_after: false,
+        quick_sync: true,
+        full_sync: false,
+      });
+    });
+  });
+
+  it("offers Normal Sync in the sync menu", async () => {
+    renderDashboard();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sync Only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quick Sync options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Normal Sync/i }));
+
+    await waitFor(() => {
+      expect(mocks.startSyncJob).toHaveBeenCalledWith({
+        scope: "all",
+        album_ids: undefined,
+        run_routing_after: false,
+        quick_sync: false,
+        full_sync: false,
       });
     });
   });
