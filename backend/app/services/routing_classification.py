@@ -11,7 +11,7 @@ import json
 import uuid
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..models.asset import Asset
@@ -596,6 +596,13 @@ class RoutingClassificationOrchestrator:
             )
         if not force:
             review_only = RoutingPlan.scope_json["review_only"].as_boolean()
+            latest_prompt_status = (
+                select(PromptRun.status)
+                .where(PromptRun.asset_id == Asset.id)
+                .order_by(PromptRun.created_at.desc(), PromptRun.id.desc())
+                .limit(1)
+                .scalar_subquery()
+            )
             q = q.filter(
                 ~Asset.id.in_(
                     self.db.query(RoutingPlanItem.asset_id)
@@ -605,7 +612,11 @@ class RoutingClassificationOrchestrator:
                         RoutingPlan.user_id == self.user_id,
                         or_(review_only.is_(None), review_only.is_(False)),
                     )
-                )
+                ),
+                or_(
+                    latest_prompt_status.is_(None),
+                    latest_prompt_status != "failed",
+                ),
             )
         q = q.order_by(Asset.created_at.asc(), Asset.id.asc())
         if limit:

@@ -455,6 +455,47 @@ def test_review_only_items_do_not_count_as_routing_history(db):
     assert routed_asset.id not in asset_ids
 
 
+def test_normal_routing_skips_latest_failures_but_full_routing_includes_them(db):
+    failed_asset = _make_asset(db, "latest-routing-failed")
+    recovered_asset = _make_asset(db, "latest-routing-recovered")
+    db.add_all([
+        PromptRun(
+            id="failed-latest-prompt",
+            asset_id=failed_asset.id,
+            provider_name="fake",
+            status="failed",
+            created_at=datetime(2026, 1, 2),
+        ),
+        PromptRun(
+            id="recovered-old-failure",
+            asset_id=recovered_asset.id,
+            provider_name="fake",
+            status="failed",
+            created_at=datetime(2026, 1, 1),
+        ),
+        PromptRun(
+            id="recovered-latest-success",
+            asset_id=recovered_asset.id,
+            provider_name="fake",
+            status="success",
+            created_at=datetime(2026, 1, 2),
+        ),
+    ])
+    db.commit()
+
+    orchestrator = _make_orchestrator(db)
+    normal_ids = {
+        asset.id for asset in orchestrator._load_assets(None, None, force=False)
+    }
+    full_ids = {
+        asset.id for asset in orchestrator._load_assets(None, None, force=True)
+    }
+
+    assert failed_asset.id not in normal_ids
+    assert recovered_asset.id in normal_ids
+    assert failed_asset.id in full_ids
+
+
 def test_process_asset_stops_when_image_preparation_fails(db):
     orchestrator = _make_orchestrator(db)
     asset = _make_asset(db, "asset-without-thumbnail")

@@ -149,7 +149,7 @@ export default function RunRoutingButton({
                 Reprocess all assets
               </span>
               <span style={{ display: "block", marginTop: 2, color: "#64748b", fontSize: 10 }}>
-                Includes previously routed photos and may increase AI usage.
+                Includes previously routed and errored photos and may increase AI usage.
               </span>
             </span>
           </button>
