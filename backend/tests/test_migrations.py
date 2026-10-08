@@ -14,6 +14,7 @@ import tempfile
 import pytest
 from alembic.config import Config
 from alembic import command
+from sqlalchemy import create_engine, inspect, text
 
 
 @pytest.fixture(scope="module")
@@ -73,5 +74,44 @@ def test_full_downgrade_and_reupgrade(alembic_cfg):
         command.upgrade(cfg, "head")
         command.downgrade(cfg, "base")
         command.upgrade(cfg, "head")
+
+    _run_with_temp_db(alembic_cfg, run)
+
+
+def test_app_settings_constraints_support_atomic_user_key_upsert(alembic_cfg):
+    def run(cfg):
+        command.upgrade(cfg, "d0e1f2a3b4c5")
+        engine = create_engine(cfg.get_main_option("sqlalchemy.url"))
+        with engine.begin() as connection:
+            connection.execute(text(
+                """
+                INSERT INTO app_settings ("key", value, id, user_id)
+                VALUES ('timezone', 'UTC', 'legacy-id', 'user-1')
+                """
+            ))
+        command.upgrade(cfg, "head")
+
+        inspector = inspect(engine)
+        assert inspector.get_pk_constraint("app_settings")["constrained_columns"] == ["id"]
+        assert any(
+            constraint["column_names"] == ["user_id", "key"]
+            for constraint in inspector.get_unique_constraints("app_settings")
+        )
+        with engine.begin() as connection:
+            connection.execute(text(
+                """
+                INSERT INTO app_settings (id, user_id, "key", value)
+                VALUES ('new-id', 'user-1', 'timezone', 'America/Los_Angeles')
+                ON CONFLICT (user_id, "key")
+                DO UPDATE SET value = excluded.value
+                """
+            ))
+            value = connection.execute(text(
+                """
+                SELECT value FROM app_settings
+                WHERE user_id = 'user-1' AND "key" = 'timezone'
+                """
+            )).scalar_one()
+        assert value == "America/Los_Angeles"
 
     _run_with_temp_db(alembic_cfg, run)
