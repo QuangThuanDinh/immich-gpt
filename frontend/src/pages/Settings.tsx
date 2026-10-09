@@ -7,14 +7,16 @@ import {
   upsertProvider,
   deleteProvider,
   testProvider,
+  testCurrentProvider,
   getProviderModels,
+  getCurrentProviderModels,
   getRoutingPreferences,
   saveRoutingPreferences,
   getHealth,
 } from "../services/api";
 import type { ProviderConfig } from "../types";
 import { formatApiError } from "../utils/apiError";
-import { CheckCircle, AlertTriangle, Plus, Trash2, Pencil, Heart, Github, Scale } from "lucide-react";
+import { CheckCircle, AlertTriangle, Plus, Trash2, Pencil, Heart, Github, Scale, RefreshCw } from "lucide-react";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import responsive from "../styles/MasterDetail.module.css";
 
@@ -136,6 +138,9 @@ interface ProviderForm {
   is_default: boolean;
 }
 
+const providerModelsQueryKey = (providerName: string, baseUrl: string) =>
+  ["provider-models", providerName, baseUrl] as const;
+
 function ModelPickerForm({
   form,
   setForm,
@@ -150,12 +155,50 @@ function ModelPickerForm({
   const usesAzureDeployment =
     form.provider_name === "openai" &&
     Boolean(form.azure_api_version || form.azure_deployment);
+  const qc = useQueryClient();
+  const queryKey = providerModelsQueryKey(form.provider_name, form.base_url);
   const { data: models } = useQuery({
-    queryKey: ["provider-models", form.provider_name, form.base_url],
+    queryKey,
     queryFn: () => getProviderModels(form.provider_name),
-    enabled: form.provider_name === "ollama" || form.provider_name === "openrouter",
+    enabled: false,
     retry: false,
   });
+  const reloadModels = useMutation({
+    mutationFn: () => getCurrentProviderModels(form),
+    onSuccess: (currentModels) => qc.setQueryData(queryKey, currentModels),
+  });
+  const canReloadModels =
+    Boolean(isEditing) &&
+    (form.provider_name === "ollama" || form.provider_name === "openrouter");
+  const reloadButton = canReloadModels ? (
+    <button
+      type="button"
+      onClick={() => reloadModels.mutate()}
+      disabled={reloadModels.isPending}
+      title="Reload models from current settings"
+      aria-label="Reload models from current settings"
+      style={{
+        width: 34,
+        height: 34,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 8,
+        border: "1px solid #334155",
+        background: "transparent",
+        color: "#38bdf8",
+        cursor: reloadModels.isPending ? "wait" : "pointer",
+      }}
+    >
+      <RefreshCw size={15} />
+    </button>
+  ) : null;
+
+  const savedModelIsUnavailable =
+    Boolean(form.model_name) &&
+    Boolean(models?.length) &&
+    !models?.some((model) => model.id === form.model_name);
 
   const providerLabels: Record<string, string> = {
     openai: "OpenAI",
@@ -203,16 +246,43 @@ function ModelPickerForm({
             Uses Azure deployment
           </div>
         ) : models && models.length > 0 ? (
-          <select value={form.model_name} onChange={(e) => setForm((f) => ({ ...f, model_name: e.target.value }))} style={_inputStyle}>
-            {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <select
+              value={form.model_name}
+              onChange={(e) => setForm((f) => ({ ...f, model_name: e.target.value }))}
+              style={{ ..._inputStyle, flex: 1 }}
+            >
+              {savedModelIsUnavailable && (
+                <option value={form.model_name}>{form.model_name}</option>
+              )}
+              {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            {savedModelIsUnavailable && (
+              <span
+                title="Saved model is not available from the provider"
+                aria-label="Saved model is not available from the provider"
+                style={{ display: "flex" }}
+              >
+                <AlertTriangle size={17} color="#fca5a5" />
+              </span>
+            )}
+            {reloadButton}
+          </div>
         ) : (
-          <input
-            value={form.model_name}
-            onChange={(e) => setForm((f) => ({ ...f, model_name: e.target.value }))}
-            style={_inputStyle}
-            placeholder={form.provider_name === "ollama" ? "llava" : form.provider_name === "openrouter" ? "openai/gpt-4o" : "gpt-4o"}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              value={form.model_name}
+              onChange={(e) => setForm((f) => ({ ...f, model_name: e.target.value }))}
+              style={{ ..._inputStyle, flex: 1 }}
+              placeholder={form.provider_name === "ollama" ? "llava" : form.provider_name === "openrouter" ? "openai/gpt-4o" : "gpt-4o"}
+            />
+            {reloadButton}
+          </div>
+        )}
+        {reloadModels.isError && (
+          <div style={{ marginTop: 4, fontSize: 11, color: "#fca5a5" }}>
+            {formatApiError(reloadModels.error, "Unable to reload models")}
+          </div>
         )}
       </div>
     </div>
@@ -378,25 +448,38 @@ function ProvidersSection() {
   const [editingName, setEditingName] = useState<string | null>(null);
   const [form, setForm] = useState<ProviderForm>(EMPTY_FORM);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+  const [currentTestResult, setCurrentTestResult] = useState<TestResult | null>(null);
 
   function openAdd() {
     setEditingName(null);
     setForm(EMPTY_FORM);
+    setCurrentTestResult(null);
     setShowAdd(true);
   }
 
   function openEdit(p: ProviderConfig) {
+    const baseUrl = p.base_url || "";
+    if (p.provider_name === "ollama" || p.provider_name === "openrouter") {
+      const queryKey = providerModelsQueryKey(p.provider_name, baseUrl);
+      qc.removeQueries({ queryKey, exact: true });
+      void qc.prefetchQuery({
+        queryKey,
+        queryFn: () => getProviderModels(p.provider_name),
+        retry: false,
+      });
+    }
     setEditingName(p.provider_name);
     setForm({
       provider_name: p.provider_name,
       api_key: "",
       model_name: p.model_name || "",
-      base_url: p.base_url || "",
+      base_url: baseUrl,
       azure_api_version: p.azure_api_version || "",
       azure_deployment: p.azure_deployment || "",
       enabled: p.enabled,
       is_default: p.is_default,
     });
+    setCurrentTestResult(null);
     setShowAdd(true);
   }
 
@@ -404,6 +487,7 @@ function ProvidersSection() {
     setShowAdd(false);
     setEditingName(null);
     setForm(EMPTY_FORM);
+    setCurrentTestResult(null);
   }
 
   const upsertMut = useMutation({
@@ -425,7 +509,22 @@ function ProvidersSection() {
     onError: (e: unknown, name) => setTestResults((r) => ({ ...r, [name]: { error: formatApiError(e, "Provider test failed") } })),
   });
 
+  const currentTestMut = useMutation({
+    mutationFn: testCurrentProvider,
+    onSuccess: (data) => setCurrentTestResult(data),
+    onError: (e: unknown) => {
+      setCurrentTestResult({ error: formatApiError(e, "Current settings test failed") });
+    },
+  });
+
   const isEditing = editingName !== null;
+  const currentAzureFieldsStarted = Boolean(
+    form.azure_api_version || form.azure_deployment,
+  );
+  const currentAzureConfigIncomplete =
+    form.provider_name === "openai" &&
+    currentAzureFieldsStarted &&
+    !(form.base_url && form.azure_deployment);
 
   return (
     <Section title="AI Providers">
@@ -460,23 +559,43 @@ function ProvidersSection() {
               {p.base_url && ` — ${p.base_url}`}
               {p.has_api_key && " — API key set"}
             </div>
-            {testResults[p.provider_name] && (
-              <div style={{ fontSize: 12, color: testResults[p.provider_name].connected ? "#86efac" : "#fca5a5" }}>
-                {testResults[p.provider_name].connected
-                  ? testResults[p.provider_name].verification_skipped
-                    ? `✓ ${testResults[p.provider_name].message || "Configuration valid; model verification skipped"}`
-                    : "✓ Connected"
-                  : `✗ ${testResults[p.provider_name].error || "Connection failed"}`}
-              </div>
-            )}
+            {editingName === p.provider_name
+              ? currentTestResult && (
+                  <div style={{ fontSize: 12, color: currentTestResult.connected ? "#86efac" : "#fca5a5" }}>
+                    {currentTestResult.connected
+                      ? currentTestResult.verification_skipped
+                        ? `✓ ${currentTestResult.message || "Configuration valid; model verification skipped"}`
+                        : "✓ Current settings connected"
+                      : `✗ ${currentTestResult.error || "Current settings failed"}`}
+                  </div>
+                )
+              : testResults[p.provider_name] && (
+                  <div style={{ fontSize: 12, color: testResults[p.provider_name].connected ? "#86efac" : "#fca5a5" }}>
+                    {testResults[p.provider_name].connected
+                      ? testResults[p.provider_name].verification_skipped
+                        ? `✓ ${testResults[p.provider_name].message || "Configuration valid; model verification skipped"}`
+                        : "✓ Connected"
+                      : `✗ ${testResults[p.provider_name].error || "Connection failed"}`}
+                  </div>
+                )}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button
-              onClick={() => testMut.mutate(p.provider_name)}
-              style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #334155", background: "transparent", color: "#64748b", fontSize: 12, cursor: "pointer" }}
-            >
-              Test
-            </button>
+            {editingName === p.provider_name ? (
+              <button
+                onClick={() => currentTestMut.mutate(form)}
+                disabled={currentTestMut.isPending || currentAzureConfigIncomplete}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #334155", background: "transparent", color: "#38bdf8", fontSize: 12, cursor: "pointer" }}
+              >
+                {currentTestMut.isPending ? "Testing..." : "Test Current Settings"}
+              </button>
+            ) : (
+              <button
+                onClick={() => testMut.mutate(p.provider_name)}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #334155", background: "transparent", color: "#64748b", fontSize: 12, cursor: "pointer" }}
+              >
+                Test
+              </button>
+            )}
             <button
               onClick={() => openEdit(p)}
               title="Edit provider"

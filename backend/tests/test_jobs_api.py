@@ -75,6 +75,23 @@ def test_list_jobs_returns_all(client, db):
     assert len(r.json()) == 2
 
 
+def test_list_jobs_hides_review_only_ai_queries(client, db):
+    visible = _make_job(db, "routing_classification", "completed")
+    ai_query = _make_job(db, "routing_classification", "completed")
+    ai_query.params_json = {
+        "asset_ids": ["asset-1"],
+        "force": True,
+        "review_only": True,
+    }
+    db.commit()
+
+    r = client.get("/api/jobs")
+
+    assert r.status_code == 200
+    assert [job["id"] for job in r.json()] == [visible.id]
+    assert client.get(f"/api/jobs/{ai_query.id}").status_code == 200
+
+
 def test_list_jobs_filter_by_type(client, db):
     _make_job(db, "asset_sync", "queued")
     _make_job(db, "classification", "queued")

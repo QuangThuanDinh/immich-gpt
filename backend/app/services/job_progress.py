@@ -18,6 +18,7 @@ def _log_timestamp() -> str:
 
 
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from ..models.job_run import JobRun
 
 
@@ -210,6 +211,8 @@ class JobProgressService:
             q = q.filter(JobRun.job_type == job_type)
         if status:
             q = q.filter(JobRun.status == status)
+        review_only = JobRun.params_json["review_only"].as_boolean()
+        q = q.filter(or_(review_only.is_(None), review_only.is_(False)))
         return q.order_by(JobRun.created_at.desc()).limit(limit).all()
 
     def _get(self, job_id: str) -> JobRun:

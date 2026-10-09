@@ -251,21 +251,57 @@ def test_provider(
     db: Session = Depends(get_db),
     current_user=Depends(require_active_user),
 ):
-    from ..services.ai_provider import build_provider
     row = db.query(ProviderConfig).filter(
         ProviderConfig.user_id == current_user.id,
         ProviderConfig.provider_name == provider_name,
     ).first()
     if not row:
         raise HTTPException(status_code=404, detail="Provider not found")
+    config = {
+        "api_key": decrypt_secret(row.api_key_encrypted) or "",
+        "model_name": row.model_name,
+        "base_url": row.base_url,
+    }
+    if row.extra_config_json:
+        config.update(row.extra_config_json)
+    return _run_provider_test(provider_name, config)
+
+
+@router.post("/providers/{provider_name}/test")
+def test_current_provider(
+    provider_name: str,
+    body: ProviderConfigCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    row = db.query(ProviderConfig).filter(
+        ProviderConfig.user_id == current_user.id,
+        ProviderConfig.provider_name == provider_name,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    if body.provider_name != provider_name:
+        raise HTTPException(status_code=400, detail="Provider name does not match URL")
+
+    extra_config = _provider_extra_config(body, row)
+    config = {
+        "api_key": body.api_key or decrypt_secret(row.api_key_encrypted) or "",
+        "model_name": (
+            body.model_name
+            if body.model_name is not None
+            else row.model_name
+        ),
+        "base_url": body.base_url if body.base_url is not None else row.base_url,
+    }
+    if extra_config:
+        config.update(extra_config)
+    return _run_provider_test(provider_name, config)
+
+
+def _run_provider_test(provider_name: str, config: dict):
+    from ..services.ai_provider import build_provider
+
     try:
-        config = {
-            "api_key": decrypt_secret(row.api_key_encrypted) or "",
-            "model_name": row.model_name,
-            "base_url": row.base_url,
-        }
-        if row.extra_config_json:
-            config.update(row.extra_config_json)
         p = build_provider(provider_name, config)
         ok = p.health_check()
         if not ok:
@@ -319,6 +355,61 @@ def list_provider_models(
             return [{"id": m["name"], "name": m["name"]} for m in models]
         else:
             raise HTTPException(status_code=400, detail=f"Model listing not supported for {provider_name}")
+    except HTTPException:
+        raise
+    except ServiceUrlError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/providers/{provider_name}/models")
+def list_current_provider_models(
+    provider_name: str,
+    body: ProviderConfigCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    row = db.query(ProviderConfig).filter(
+        ProviderConfig.user_id == current_user.id,
+        ProviderConfig.provider_name == provider_name,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    if body.provider_name != provider_name:
+        raise HTTPException(status_code=400, detail="Provider name does not match URL")
+
+    base_url = body.base_url if body.base_url is not None else row.base_url
+    api_key = body.api_key or decrypt_secret(row.api_key_encrypted) or ""
+    try:
+        if provider_name == "openrouter":
+            import httpx
+            from ..services.ai_provider import get_openrouter_api_base_url
+
+            base = get_openrouter_api_base_url(base_url)
+            r = httpx.get(
+                f"{base}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=10,
+            )
+            r.raise_for_status()
+            data = r.json().get("data", [])
+            return [{"id": m["id"], "name": m.get("name", m["id"])} for m in data]
+        if provider_name == "ollama":
+            import httpx
+
+            base = validate_service_url(
+                base_url or "http://localhost:11434",
+                field_name="Ollama URL",
+            )
+            r = httpx.get(f"{base}/api/tags", timeout=10)
+            r.raise_for_status()
+            models = r.json().get("models", [])
+            return [{"id": m["name"], "name": m["name"]} for m in models]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model listing not supported for {provider_name}",
+        )
     except HTTPException:
         raise
     except ServiceUrlError as e:

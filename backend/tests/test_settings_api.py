@@ -373,6 +373,49 @@ def test_test_provider_reports_skipped_azure_verification(client, db):
     assert build.call_args.args[1]["azure_deployment"] == "vision-deployment"
 
 
+def test_test_current_provider_uses_draft_without_saving(client, db):
+    provider = _make_provider(db, "openai", base_url="https://saved.example/v1")
+    mock_provider = MagicMock()
+    mock_provider.health_check.return_value = True
+
+    with patch("app.routers.settings.decrypt_secret", return_value="stored-key"):
+        with patch("app.services.ai_provider.build_provider", return_value=mock_provider) as build:
+            r = client.post(
+                "/api/settings/providers/openai/test",
+                json={
+                    "provider_name": "openai",
+                    "api_key": "",
+                    "base_url": "https://draft.example/v1",
+                    "model_name": "draft-model",
+                    "enabled": True,
+                    "is_default": False,
+                },
+            )
+
+    assert r.status_code == 200
+    assert r.json()["connected"] is True
+    assert build.call_args.args[1] == {
+        "api_key": "stored-key",
+        "base_url": "https://draft.example/v1",
+        "model_name": "draft-model",
+    }
+    db.refresh(provider)
+    assert provider.base_url == "https://saved.example/v1"
+    assert provider.model_name == "gpt-4o"
+
+
+def test_test_current_provider_rejects_mismatched_name(client, db):
+    _make_provider(db, "openai")
+
+    r = client.post(
+        "/api/settings/providers/openai/test",
+        json={"provider_name": "openrouter"},
+    )
+
+    assert r.status_code == 400
+    assert "does not match" in r.json()["detail"]
+
+
 def test_list_ollama_models_rejects_restricted_url(client, db, monkeypatch):
     from app.config import settings
 
@@ -411,6 +454,42 @@ def test_list_openrouter_models_uses_custom_base_url(client, db, monkeypatch):
     assert r.status_code == 200
     assert r.json() == [{"id": "local/model", "name": "Local Model"}]
     assert http_get.call_args.args[0] == "http://192.168.0.19:4000/v1/models"
+
+
+def test_list_current_openrouter_models_uses_draft_settings(client, db, monkeypatch):
+    from app.config import settings
+
+    provider = _make_provider(
+        db,
+        "openrouter",
+        base_url="http://192.168.0.19:4000/v1",
+    )
+    monkeypatch.setattr(settings, "ALLOW_PRIVATE_SERVICE_URLS", True)
+    response = MagicMock()
+    response.json.return_value = {
+        "data": [{"id": "draft/model", "name": "Draft Model"}]
+    }
+
+    with patch("app.routers.settings.decrypt_secret", return_value="stored-key"):
+        with patch("httpx.get", return_value=response) as http_get:
+            r = client.post(
+                "/api/settings/providers/openrouter/models",
+                json={
+                    "provider_name": "openrouter",
+                    "api_key": "",
+                    "base_url": "http://192.168.0.20:4001/v1",
+                    "model_name": "draft/model",
+                },
+            )
+
+    assert r.status_code == 200
+    assert r.json() == [{"id": "draft/model", "name": "Draft Model"}]
+    assert http_get.call_args.args[0] == "http://192.168.0.20:4001/v1/models"
+    assert http_get.call_args.kwargs["headers"] == {
+        "Authorization": "Bearer stored-key"
+    }
+    db.refresh(provider)
+    assert provider.base_url == "http://192.168.0.19:4000/v1"
 
 
 def test_routing_preferences_default_off(client):

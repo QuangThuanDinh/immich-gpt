@@ -124,7 +124,7 @@ export const testImmichConnection = (url: string, apiKey: string) =>
 export const getProviders = (): Promise<ProviderConfig[]> =>
   api.get("/settings/providers").then((r) => r.data);
 
-export const upsertProvider = (data: {
+export interface ProviderInput {
   provider_name: string;
   enabled?: boolean;
   is_default?: boolean;
@@ -133,7 +133,10 @@ export const upsertProvider = (data: {
   model_name?: string;
   azure_api_version?: string;
   azure_deployment?: string;
-}) => api.post("/settings/providers", data).then((r) => r.data);
+}
+
+export const upsertProvider = (data: ProviderInput) =>
+  api.post("/settings/providers", data).then((r) => r.data);
 
 export const deleteProvider = (name: string) =>
   api.delete(`/settings/providers/${name}`).then((r) => r.data);
@@ -141,8 +144,16 @@ export const deleteProvider = (name: string) =>
 export const testProvider = (name: string) =>
   api.get(`/settings/providers/${name}/test`).then((r) => r.data);
 
+export const testCurrentProvider = (data: ProviderInput) =>
+  api.post(`/settings/providers/${data.provider_name}/test`, data).then((r) => r.data);
+
 export const getProviderModels = (name: string): Promise<Array<{ id: string; name: string }>> =>
   api.get(`/settings/providers/${name}/models`).then((r) => r.data);
+
+export const getCurrentProviderModels = (
+  data: ProviderInput,
+): Promise<Array<{ id: string; name: string }>> =>
+  api.post(`/settings/providers/${data.provider_name}/models`, data).then((r) => r.data);
 
 // --- Assets ---
 export const getAssets = (params?: {
