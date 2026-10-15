@@ -28,6 +28,7 @@ function StatusIcon({ status }: { status?: string }) {
 }
 
 function jobTypeLabel(jobType: string) {
+  if (jobType === "recurring_workflow") return "Recurring run";
   if (jobType === "asset_sync") return "Asset sync job";
   if (jobType === "classification") return "Classification job";
   return jobType.replace(/_/g, " ");

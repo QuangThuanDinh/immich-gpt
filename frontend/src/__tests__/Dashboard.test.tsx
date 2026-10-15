@@ -212,7 +212,7 @@ describe("Dashboard workflow", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Add schedule" }));
 
-    expect(await screen.findByText("Daily at 06:00")).toBeInTheDocument();
+    expect(await screen.findByText("Daily at 6:00 AM")).toBeInTheDocument();
     expect(mocks.createWorkflowSchedule).toHaveBeenCalledWith({
       daily_time: "06:00",
       timezone: expect.any(String),
@@ -230,7 +230,7 @@ describe("Dashboard workflow", () => {
     expect(await screen.findByText("Active · Quick Sync + Route")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Remove daily schedule at 06:00",
+      name: "Remove daily schedule at 6:00 AM",
     }));
     expect(await screen.findByText("No recurring triggers configured.")).toBeInTheDocument();
   });
@@ -243,16 +243,16 @@ describe("Dashboard workflow", () => {
     fireEvent.change(timeInput, { target: { value: "06:00" } });
     fireEvent.click(screen.getByRole("button", { name: "Add schedule" }));
     await screen.findByRole("listitem", {
-      name: "Recurring schedule at 06:00",
+      name: "Recurring schedule at 6:00 AM",
     });
     fireEvent.change(timeInput, { target: { value: "07:00" } });
     fireEvent.click(screen.getByRole("button", { name: "Add schedule" }));
 
     const first = await screen.findByRole("listitem", {
-      name: "Recurring schedule at 06:00",
+      name: "Recurring schedule at 6:00 AM",
     });
     const second = screen.getByRole("listitem", {
-      name: "Recurring schedule at 07:00",
+      name: "Recurring schedule at 7:00 AM",
     });
     const firstPause = within(first).getByRole("button", { name: "Pause" });
     const firstRemove = within(first).getByRole("button", { name: /Remove daily schedule/i });

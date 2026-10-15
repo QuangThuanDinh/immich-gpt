@@ -1,7 +1,16 @@
 from datetime import datetime, timezone
 
 from app.models.workflow_schedule import WorkflowSchedule
-from app.services.workflow_scheduler import calculate_next_run, enqueue_due_schedules
+from app.models.job_run import JobRun
+from app.services.workflow_scheduler import (
+    SCHEDULER_POLL_SECONDS,
+    calculate_next_run,
+    enqueue_due_schedules,
+)
+
+
+def test_scheduler_scans_every_ten_minutes():
+    assert SCHEDULER_POLL_SECONDS == 10 * 60
 
 
 def test_schedule_crud_is_owned_by_current_user(client, db, test_admin):
@@ -84,7 +93,7 @@ def test_due_schedule_enqueues_recurring_quick_sync(db, test_user, monkeypatch):
     calls = []
     monkeypatch.setattr(
         "app.workers.executor.enqueue_asset_sync",
-        lambda *args, **kwargs: calls.append((args, kwargs)),
+        lambda *args, **kwargs: calls.append((args, kwargs)) or "sync-job-id",
     )
 
     count = enqueue_due_schedules(
@@ -105,3 +114,11 @@ def test_due_schedule_enqueues_recurring_quick_sync(db, test_user, monkeypatch):
     db.refresh(schedule)
     assert schedule.last_run_at == datetime(2026, 10, 14, 6, 0)
     assert schedule.next_run_at == datetime(2026, 10, 15, 6, 0)
+    recurring_job = db.query(JobRun).filter(
+        JobRun.job_type == "recurring_workflow",
+        JobRun.user_id == test_user.id,
+    ).one()
+    assert recurring_job.status == "completed"
+    assert recurring_job.current_step == "Recurring run at 06:00 (UTC)"
+    assert recurring_job.params_json["schedule_id"] == schedule.id
+    assert recurring_job.params_json["asset_sync_job_id"] == "sync-job-id"

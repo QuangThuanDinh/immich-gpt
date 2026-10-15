@@ -66,7 +66,7 @@ export default function Jobs() {
             <MobileSidebarToggle />
             <h1 className={styles.title}>Jobs</h1>
           </div>
-          <p className={styles.subtitle}>Background sync and routing classification jobs</p>
+          <p className={styles.subtitle}>Recurring, sync, and routing classification jobs</p>
         </div>
         <div className={styles.actions}>
           <RunSyncButton
@@ -86,6 +86,7 @@ export default function Jobs() {
       <div className={styles.filter}>
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={styles.filterSelect}>
           <option value="">All types</option>
+          <option value="recurring_workflow">Recurring Run</option>
           <option value="asset_sync">Asset Sync</option>
           <option value="routing_classification">Routing Classification</option>
         </select>

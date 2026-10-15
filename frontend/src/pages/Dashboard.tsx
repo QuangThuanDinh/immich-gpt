@@ -57,8 +57,19 @@ const SCOPE_OPTIONS: { value: SyncScope; label: string; desc: string; icon: Reac
 type WorkflowMode = "sync" | "sync_route" | "route" | "recurring";
 const recurringHours = Array.from(
   { length: 24 },
-  (_, hour) => `${String(hour).padStart(2, "0")}:00`,
+  (_, hour) => {
+    const value = `${String(hour).padStart(2, "0")}:00`;
+    const period = hour < 12 ? "AM" : "PM";
+    return {
+      value,
+      label: `${hour % 12 || 12}:00 ${period}`,
+    };
+  },
 );
+
+function formatRecurringHour(value: string) {
+  return recurringHours.find((hour) => hour.value === value)?.label ?? value;
+}
 
 function WorkflowPanel({
   onSync, onRoute, isLoading, disabled,
@@ -351,7 +362,7 @@ function WorkflowPanel({
                 className={styles.recurringTimeInput}
               >
                 {recurringHours.map((hour) => (
-                  <option key={hour} value={hour}>{hour}</option>
+                  <option key={hour.value} value={hour.value}>{hour.label}</option>
                 ))}
               </select>
             </label>
@@ -394,7 +405,7 @@ function WorkflowPanel({
                   }
                 }}
                 role="listitem"
-                aria-label={`Recurring schedule at ${trigger.daily_time}`}
+                aria-label={`Recurring schedule at ${formatRecurringHour(trigger.daily_time)}`}
                 tabIndex={trigger.id === activeRecurringId ? 0 : -1}
                 className={styles.recurringItem}
                 onFocus={(event) => {
@@ -407,7 +418,9 @@ function WorkflowPanel({
                 }}
               >
                 <div>
-                  <div className={styles.recurringItemTime}>Daily at {trigger.daily_time}</div>
+                  <div className={styles.recurringItemTime}>
+                    Daily at {formatRecurringHour(trigger.daily_time)}
+                  </div>
                   <div className={styles.recurringItemStatus}>
                     {trigger.enabled ? "Active" : "Paused"} · Quick Sync + Route
                   </div>
@@ -451,7 +464,7 @@ function WorkflowPanel({
                       1,
                     )}
                     className={styles.recurringRemove}
-                    aria-label={`Remove daily schedule at ${trigger.daily_time}`}
+                    aria-label={`Remove daily schedule at ${formatRecurringHour(trigger.daily_time)}`}
                   >
                     <Trash2 size={13} />
                     Remove

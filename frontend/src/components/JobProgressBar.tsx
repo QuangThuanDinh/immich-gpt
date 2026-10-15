@@ -49,14 +49,17 @@ function StatusIcon({ status }: { status: string }) {
 export default function JobProgressBar({ job, compact = false }: Props) {
   const color = STATUS_COLORS[job.status] ?? "#94a3b8";
   const label = STATUS_LABELS[job.status] ?? job.status;
+  const jobTypeLabel = job.job_type === "asset_sync"
+    ? "Asset Sync"
+    : job.job_type === "recurring_workflow"
+      ? "Recurring Run"
+      : "AI Classification";
 
   return (
     <div className={[styles.root, compact ? styles.rootCompact : styles.rootFull].join(" ")}>
       <div className={[styles.header, compact ? styles.headerCompact : styles.headerFull].join(" ")}>
         <StatusIcon status={job.status} />
-        <span className={styles.jobType}>
-          {job.job_type === "asset_sync" ? "Asset Sync" : "AI Classification"}
-        </span>
+        <span className={styles.jobType}>{jobTypeLabel}</span>
         <span
           className={styles.statusBadge}
           style={{ color, background: `${color}18` }}

@@ -31,6 +31,11 @@ describe("JobProgressBar", () => {
     expect(screen.getByText("AI Classification")).toBeInTheDocument();
   });
 
+  it("shows 'Recurring Run' label for recurring workflow jobs", () => {
+    render(<JobProgressBar job={{ ...baseJob, job_type: "recurring_workflow" }} />);
+    expect(screen.getByText("Recurring Run")).toBeInTheDocument();
+  });
+
   it("shows the status label", () => {
     render(<JobProgressBar job={{ ...baseJob, status: "completed" }} />);
     expect(screen.getByText("Completed")).toBeInTheDocument();
