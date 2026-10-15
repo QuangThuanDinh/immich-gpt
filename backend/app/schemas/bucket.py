@@ -233,8 +233,19 @@ class RoutingPlanOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class RoutingPlanListItem(BaseModel):
+    id: str
+    status: str
+    item_count: int = 0
+    archived: bool = False
+    recurring: bool = False
+    auto_approve: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
 class RoutingPlanPage(BaseModel):
-    items: List[RoutingPlanOut]
+    items: List[RoutingPlanListItem]
     has_more: bool
     limit: int
     offset: int

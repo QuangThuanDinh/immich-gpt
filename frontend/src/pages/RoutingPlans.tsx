@@ -3,13 +3,18 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tansta
 import { useSearchParams } from "react-router-dom";
 import {
   listRoutingPlansPage,
+  getRoutingPlan,
   getRoutingPlanSummary,
   listRoutingNodes,
   applyRoutingPlan,
   startRoutingClassify,
   archiveRoutingPlan,
 } from "../services/api";
-import type { RoutingPlanSummary, RoutingPlanGroupItem } from "../types";
+import type {
+  RoutingPlan,
+  RoutingPlanSummary,
+  RoutingPlanGroupItem,
+} from "../types";
 import { usePageVisible } from "../hooks/usePageVisible";
 import RunRoutingButton from "../components/RunRoutingButton";
 import RoutingPlanGroup from "../components/RoutingPlanGroup";
@@ -19,7 +24,7 @@ import masterDetail from "../styles/MasterDetail.module.css";
 import styles from "./RoutingPlans.module.css";
 import {
   Archive, ArchiveRestore, CheckCircle2, AlertTriangle, Trash2,
-  XCircle, Clock, ChevronLeft, type LucideIcon,
+  XCircle, Clock, ChevronLeft, LoaderCircle, type LucideIcon,
 } from "lucide-react";
 import { useTimezone } from "../hooks/useTimezone";
 
@@ -78,6 +83,8 @@ export default function RoutingPlans() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isFetching: plansFetching,
+    isError: plansError,
   } = useInfiniteQuery({
     queryKey: ["routing-plans", { archived: archiveMode }],
     queryFn: ({ pageParam }) => listRoutingPlansPage({
@@ -119,6 +126,17 @@ export default function RoutingPlans() {
     enabled: !!selectedPlanId,
     refetchInterval: pageVisible ? 5000 : false,
   });
+  const {
+    data: selectedPlan,
+    isLoading: planLoading,
+    isError: planError,
+  } = useQuery<RoutingPlan>({
+    queryKey: ["routing-plan", selectedPlanId],
+    queryFn: () => getRoutingPlan(selectedPlanId!),
+    enabled: !!selectedPlanId,
+  });
+  const detailLoading = planLoading || summaryLoading;
+  const detailError = planError || summaryError;
 
   const classifyMut = useMutation({
     mutationFn: (force: boolean) => startRoutingClassify({ force }),
@@ -263,7 +281,22 @@ export default function RoutingPlans() {
               Archived
             </button>
           </div>
-          {plans.length === 0 && (
+          {plansFetching && !isFetchingNextPage && (
+            <div
+              role="status"
+              aria-label={archiveMode ? "Loading archived plans" : "Loading recent plans"}
+              className={styles.loadingState}
+            >
+              <LoaderCircle size={18} className={styles.spinner} />
+              <span>{archiveMode ? "Loading archived plans..." : "Loading recent plans..."}</span>
+            </div>
+          )}
+          {plansError && (
+            <div role="alert" className={styles.errorState}>
+              Could not load {archiveMode ? "archived" : "recent"} plans.
+            </div>
+          )}
+          {!plansFetching && !plansError && plans.length === 0 && (
             <div style={{ color: "#475569", fontSize: 13 }}>
               {archiveMode ? "No archived plans." : "No plans yet. Run a routing job first."}
             </div>
@@ -331,10 +364,10 @@ export default function RoutingPlans() {
               <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
                 {p.status} · {p.item_count} item{p.item_count === 1 ? "" : "s"}
               </div>
-              {p.scope?.recurring === true && (
+              {p.recurring && (
                 <div className={styles.planBadges}>
                   <span className={styles.planBadge}>Recurring</span>
-                  {p.scope?.auto_approve === true && (
+                  {p.auto_approve && (
                     <span className={styles.planBadge}>Auto-approved</span>
                   )}
                 </div>
@@ -395,19 +428,24 @@ export default function RoutingPlans() {
               Select a plan from the list, or run a new one.
             </div>
           )}
-          {selectedPlanId && summaryLoading && (
-            <div style={{
+          {selectedPlanId && detailLoading && (
+            <div
+              role="status"
+              aria-label="Loading plan details"
+              style={{
               padding: 32, textAlign: "center", display: "flex", alignItems: "center", gap: 10,
               background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12,
               color: "#64748b",
-            }}>
+              }}
+            >
               <button type="button" className={masterDetail.headerBackButton} onClick={closePlan} aria-label="Back to plans">
                 <ChevronLeft size={20} />
               </button>
-              <span>Loading plan summary...</span>
+              <LoaderCircle size={18} className={styles.spinner} />
+              <span>Loading plan details...</span>
             </div>
           )}
-          {selectedPlanId && summaryError && (
+          {selectedPlanId && detailError && (
             <div style={{
               padding: 32, textAlign: "center", display: "flex", alignItems: "center", gap: 10,
               background: "#0f172a", border: "1px solid #7f1d1d", borderRadius: 12,
@@ -416,10 +454,10 @@ export default function RoutingPlans() {
               <button type="button" className={masterDetail.headerBackButton} onClick={closePlan} aria-label="Back to plans">
                 <ChevronLeft size={20} />
               </button>
-              <span>Could not load this plan summary. Try selecting it again.</span>
+              <span>Could not load this plan. Try selecting it again.</span>
             </div>
           )}
-          {selectedPlanId && summary && (
+          {selectedPlanId && selectedPlan && summary && (
             <div>
               <div style={{
                 background: "#0f172a", border: "1px solid #1e293b",
@@ -431,7 +469,9 @@ export default function RoutingPlans() {
                     <ChevronLeft size={20} />
                   </button>
                   <div>
-                    <div style={{ fontSize: 12, color: "#64748b" }}>Plan total</div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>
+                      {selectedPlan.status} plan
+                    </div>
                     <div style={{ fontSize: 20, color: "#f1f5f9", fontWeight: 700 }}>
                       {summary.total} item{summary.total === 1 ? "" : "s"}
                     </div>

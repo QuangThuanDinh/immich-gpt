@@ -10,6 +10,7 @@ import type {
   RoutingNode,
   RoutingExample,
   RoutingPlan,
+  RoutingPlanListItem,
   RoutingPlanPage,
   RoutingPlanItem,
   RoutingPlanItemUpdate,
@@ -348,7 +349,7 @@ export const listRoutingPlans = (params?: {
   archived?: boolean;
   limit?: number;
   offset?: number;
-}): Promise<RoutingPlan[]> =>
+}): Promise<RoutingPlanListItem[]> =>
   listRoutingPlansPage(params).then((page) => page.items);
 
 export const getRoutingPlan = (planId: string): Promise<RoutingPlan> =>

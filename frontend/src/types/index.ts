@@ -238,8 +238,19 @@ export interface RoutingPlan {
   updated_at: string;
 }
 
+export interface RoutingPlanListItem {
+  id: string;
+  status: string;
+  item_count: number;
+  archived: boolean;
+  recurring: boolean;
+  auto_approve: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface RoutingPlanPage {
-  items: RoutingPlan[];
+  items: RoutingPlanListItem[];
   has_more: boolean;
   limit: number;
   offset: number;

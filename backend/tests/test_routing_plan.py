@@ -396,7 +396,12 @@ def test_review_only_plans_are_hidden_from_routing_plans(client, db):
         id="visible-plan",
         user_id=TEST_USER_ID,
         status="ready",
-        scope_json={},
+        scope_json={
+            "asset_ids": [f"asset-{index}" for index in range(100)],
+            "recurring": True,
+            "auto_approve": True,
+        },
+        summary_json={"large_detail": "not needed in list"},
     )
     ephemeral = RoutingPlan(
         id="review-only-plan",
@@ -411,6 +416,19 @@ def test_review_only_plans_are_hidden_from_routing_plans(client, db):
 
     assert response.status_code == 200
     assert [plan["id"] for plan in response.json()["items"]] == [visible.id]
+    listed = response.json()["items"][0]
+    assert listed["recurring"] is True
+    assert listed["auto_approve"] is True
+    assert "scope" not in listed
+    assert "summary" not in listed
+    assert "job_id" not in listed
+
+    detail = client.get(f"/api/routing/plans/{visible.id}")
+    assert detail.status_code == 200
+    assert detail.json()["scope"]["asset_ids"][0] == "asset-0"
+    assert detail.json()["summary"] == {
+        "large_detail": "not needed in list",
+    }
 
 
 def test_routing_plans_are_paged_archived_and_restored(client, db):

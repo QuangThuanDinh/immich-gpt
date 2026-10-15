@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from ..config import settings
 from ..models.routing_plan import RoutingPlan, RoutingPlanItem
@@ -57,7 +57,18 @@ class RoutingPlanService:
         limit: int = 10,
         offset: int = 0,
     ) -> tuple[List[RoutingPlan], bool]:
-        q = self.db.query(RoutingPlan).filter(RoutingPlan.user_id == self.user_id)
+        q = (
+            self.db.query(RoutingPlan)
+            .options(load_only(
+                RoutingPlan.id,
+                RoutingPlan.status,
+                RoutingPlan.scope_json,
+                RoutingPlan.archived,
+                RoutingPlan.created_at,
+                RoutingPlan.updated_at,
+            ))
+            .filter(RoutingPlan.user_id == self.user_id)
+        )
         if status:
             q = q.filter(RoutingPlan.status == status)
         q = q.filter(RoutingPlan.archived.is_(archived))

@@ -379,7 +379,18 @@ export default function RoutingPlanGroup({
       {expanded && (
         <div className={styles.panel}>
           {actionError && <div className={`${styles.message} ${styles.error}`}>{actionError}</div>}
-          {isLoading && <div className={styles.message}>Loading photos...</div>}
+          {isLoading && (
+            <div
+              role="status"
+              aria-label="Loading plan items"
+              className={styles.message}
+            >
+              <span className={styles.buttonContent}>
+                <LoaderCircle className={styles.spinner} size={14} />
+                Loading photos...
+              </span>
+            </div>
+          )}
           {isError && <div className={`${styles.message} ${styles.error}`}>Could not load photos.</div>}
           {!isLoading && !isError && items.length === 0 && <div className={styles.message}>No photos on this page.</div>}
           <div className={styles.list}>

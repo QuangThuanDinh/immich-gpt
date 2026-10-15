@@ -18,7 +18,8 @@ from ..models.asset import Asset
 from ..schemas.bucket import (
     RoutingNodeCreate, RoutingNodeUpdate, RoutingNodeOut, RoutingNodeMove,
     RoutingExampleCreate, RoutingExampleOut,
-    RoutingPlanOut, RoutingPlanPage, RoutingPlanArchiveRequest, RoutingPlanItemOut,
+    RoutingPlanOut, RoutingPlanListItem, RoutingPlanPage,
+    RoutingPlanArchiveRequest, RoutingPlanItemOut,
     RoutingClassifyRequest,
     RoutingTreeTransfer,
     PlanItemMoveRequest, PlanItemActionRequest, PlanItemUpdateRequest,
@@ -373,6 +374,23 @@ def _plan_to_out(plan: RoutingPlan, item_count: int) -> RoutingPlanOut:
     )
 
 
+def _plan_to_list_item(
+    plan: RoutingPlan,
+    item_count: int,
+) -> RoutingPlanListItem:
+    scope = plan.scope_json or {}
+    return RoutingPlanListItem(
+        id=plan.id,
+        status=plan.status,
+        item_count=item_count,
+        archived=bool(plan.archived),
+        recurring=scope.get("recurring") is True,
+        auto_approve=scope.get("auto_approve") is True,
+        created_at=plan.created_at,
+        updated_at=plan.updated_at or plan.created_at,
+    )
+
+
 @router.get("/plans", response_model=RoutingPlanPage)
 def list_plans(
     status: Optional[str] = None,
@@ -391,7 +409,10 @@ def list_plans(
     )
     counts = svc.item_counts_by_plan([p.id for p in plans])
     return RoutingPlanPage(
-        items=[_plan_to_out(p, counts.get(p.id, 0)) for p in plans],
+        items=[
+            _plan_to_list_item(p, counts.get(p.id, 0))
+            for p in plans
+        ],
         has_more=has_more,
         limit=limit,
         offset=offset,
@@ -408,8 +429,8 @@ def get_plan(
     plan = svc.get_plan(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    items = svc.list_items(plan_id)
-    return _plan_to_out(plan, len(items))
+    count = svc.item_counts_by_plan([plan_id]).get(plan_id, 0)
+    return _plan_to_out(plan, count)
 
 
 @router.delete("/plans/{plan_id}")

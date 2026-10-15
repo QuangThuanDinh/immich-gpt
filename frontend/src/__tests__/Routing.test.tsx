@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   exportTreeSettingsMock: vi.fn(),
   importTreeSettingsMock: vi.fn(),
   plansMock: vi.fn(),
+  planMock: vi.fn(),
   planSummaryMock: vi.fn(),
   planItemsMock: vi.fn(),
   updateItemMock: vi.fn(),
@@ -80,13 +81,13 @@ vi.mock("../services/api", () => ({
     immich_url: "https://image.example.com/",
     connected: true,
   }),
-  getRoutingPlan: vi.fn(),
+  getRoutingPlan: mocks.planMock,
   getThumbnailUrl: (assetId: string) => `/api/thumbnails/${assetId}`,
 }));
 
 const {
   treeMock, createMock, examplesMock, promptPreviewMock,
-  classifyMock, plansMock, planSummaryMock, planItemsMock, updateItemMock,
+  classifyMock, plansMock, planMock, planSummaryMock, planItemsMock, updateItemMock,
   evaluationMock, saveEvaluationMock, runEvaluationMock, runEvaluationItemMock,
   routingPreferencesMock,
   exportTreeSettingsMock, importTreeSettingsMock,
@@ -135,6 +136,7 @@ beforeEach(() => {
   examplesMock.mockReset();
   promptPreviewMock.mockReset();
   plansMock.mockReset();
+  planMock.mockReset();
   planSummaryMock.mockReset();
   planItemsMock.mockReset();
   updateItemMock.mockReset();
@@ -205,6 +207,17 @@ beforeEach(() => {
     created_at: "2026-05-05T10:00:00Z",
   });
   planItemsMock.mockResolvedValue([]);
+  planMock.mockImplementation(async (planId: string) => ({
+    id: planId,
+    job_id: null,
+    status: "ready",
+    scope: {},
+    summary: {},
+    item_count: 0,
+    archived: false,
+    created_at: "2026-10-14T00:00:00Z",
+    updated_at: "2026-10-14T00:00:00Z",
+  }));
   nodesMock.mockResolvedValue([]);
   planSummaryMock.mockResolvedValue({
     plan_id: "plan-1",
@@ -872,6 +885,43 @@ describe("Routing tree page", () => {
 });
 
 describe("Routing plans page", () => {
+  it("shows a spinner while archived plans are loading", async () => {
+    plansMock
+      .mockResolvedValueOnce([])
+      .mockReturnValueOnce(new Promise(() => undefined));
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    await screen.findByText("No plans yet. Run a routing job first.");
+    fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
+
+    expect(await screen.findByRole("status", {
+      name: "Loading archived plans",
+    })).toBeInTheDocument();
+  });
+
+  it("loads plan detail metadata and shows a spinner after selection", async () => {
+    plansMock.mockResolvedValue([{
+      id: "detail-plan",
+      status: "ready",
+      item_count: 1,
+      archived: false,
+      recurring: false,
+      auto_approve: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }]);
+    planMock.mockReturnValue(new Promise(() => undefined));
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+    fireEvent.click(await screen.findByRole("button", {
+      name: /Open ready plan/,
+    }));
+
+    expect(await screen.findByRole("status", {
+      name: "Loading plan details",
+    })).toBeInTheDocument();
+    expect(planMock).toHaveBeenCalledWith("detail-plan");
+  });
   it("renders empty state when no plans", async () => {
     plansMock.mockResolvedValue([]);
     render(<Wrapper><RoutingPlans /></Wrapper>);
@@ -899,7 +949,8 @@ describe("Routing plans page", () => {
         job_id: null,
         status: "applied",
         item_count: 2,
-        scope: { recurring: true, auto_approve: true },
+        recurring: true,
+        auto_approve: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
