@@ -455,7 +455,8 @@ def archive_plan(
     plan = svc.set_archived(plan_id, body.archived)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-    return _plan_to_out(plan, len(svc.list_items(plan_id)))
+    count = svc.item_counts_by_plan([plan_id]).get(plan_id, 0)
+    return _plan_to_out(plan, count)
 
 
 @router.get("/plans/{plan_id}/summary")

@@ -173,14 +173,13 @@ class RoutingPlanService:
         bucket_id: Optional[str] = None,
     ) -> List[RoutingPlanItem]:
         q = self.db.query(RoutingPlanItem).filter(
-            RoutingPlanItem.user_id == self.user_id,
             RoutingPlanItem.plan_id == plan_id,
         )
         if status:
             q = q.filter(RoutingPlanItem.status == status)
         if bucket_id:
             q = q.filter(RoutingPlanItem.primary_bucket_id == bucket_id)
-        return q.order_by(RoutingPlanItem.created_at.asc()).all()
+        return q.all()
 
     def list_group_items(
         self,
@@ -191,14 +190,55 @@ class RoutingPlanService:
         bucket_id: Optional[str] = None,
         path: Optional[str] = None,
     ) -> List[RoutingPlanItem]:
-        items = self.list_items(plan_id, bucket_id=bucket_id)
-        matching = [
-            item for item in items
-            if self._classify_group(item) == group_key
-            and (bucket_id is not None or item.primary_bucket_path == path)
-        ]
-        start = (page - 1) * page_size
-        return matching[start:start + page_size]
+        terminal_groups = ("applied", "failed", "rejected")
+        query = self.db.query(RoutingPlanItem).filter(
+            RoutingPlanItem.plan_id == plan_id,
+        )
+        if group_key == "auto_applied":
+            query = query.filter(RoutingPlanItem.status == "applied")
+        elif group_key == "failed":
+            query = query.filter(RoutingPlanItem.status == "failed")
+        elif group_key == "rejected":
+            query = query.filter(RoutingPlanItem.status == "rejected")
+        elif group_key == "trash_candidates":
+            query = query.filter(
+                RoutingPlanItem.status.notin_(terminal_groups),
+                RoutingPlanItem.disposition == "trash_candidate",
+            )
+        elif group_key == "needs_review":
+            query = query.filter(
+                RoutingPlanItem.status.notin_(terminal_groups),
+                RoutingPlanItem.disposition != "trash_candidate",
+                RoutingPlanItem.review_required.is_(True),
+            )
+        elif group_key == "ready_to_approve":
+            query = query.filter(
+                RoutingPlanItem.status.notin_(terminal_groups),
+                RoutingPlanItem.disposition != "trash_candidate",
+                RoutingPlanItem.review_required.is_(False),
+            )
+        else:
+            return []
+
+        if bucket_id is not None:
+            query = query.filter(
+                RoutingPlanItem.primary_bucket_id == bucket_id,
+            )
+        elif path is None:
+            query = query.filter(
+                RoutingPlanItem.primary_bucket_path.is_(None),
+            )
+        else:
+            query = query.filter(
+                RoutingPlanItem.primary_bucket_path == path,
+            )
+
+        return (
+            query.order_by(RoutingPlanItem.created_at.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
 
     def get_item(self, item_id: str) -> Optional[RoutingPlanItem]:
         return (
@@ -215,7 +255,21 @@ class RoutingPlanService:
     # ------------------------------------------------------------------
 
     def summarize(self, plan_id: str) -> Dict[str, Any]:
-        items = self.list_items(plan_id)
+        items = (
+            self.db.query(RoutingPlanItem)
+            .options(load_only(
+                RoutingPlanItem.id,
+                RoutingPlanItem.primary_bucket_id,
+                RoutingPlanItem.primary_bucket_path,
+                RoutingPlanItem.disposition,
+                RoutingPlanItem.review_required,
+                RoutingPlanItem.status,
+            ))
+            .filter(
+                RoutingPlanItem.plan_id == plan_id,
+            )
+            .all()
+        )
         groups: Dict[str, Dict[str, Any]] = {
             "auto_applied": {},
             "ready_to_approve": {},

@@ -20,7 +20,7 @@ _WEAK_SECRET_KEYS = {
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "Immich GPT"
-    APP_VERSION: str = "0.6.31"
+    APP_VERSION: str = "0.6.32"
     DEBUG: bool = False
     TZ: str = "UTC"
 
