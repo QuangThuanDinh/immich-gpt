@@ -17,6 +17,9 @@ export default function RunSyncButton({
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const optionsButtonRef = useRef<HTMLButtonElement>(null);
+  const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const focusIndexOnOpenRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -27,7 +30,10 @@ export default function RunSyncButton({
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        optionsButtonRef.current?.focus();
+      }
     };
 
     document.addEventListener("mousedown", closeOnOutsideClick);
@@ -38,7 +44,14 @@ export default function RunSyncButton({
     };
   }, [open]);
 
-  const toggleMenu = () => {
+  useEffect(() => {
+    if (open && focusIndexOnOpenRef.current !== null) {
+      menuItemRefs.current[focusIndexOnOpenRef.current]?.focus();
+      focusIndexOnOpenRef.current = null;
+    }
+  }, [open]);
+
+  const toggleMenu = (focusIndex = 0) => {
     if (!open && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const viewportPadding = 16;
@@ -57,10 +70,53 @@ export default function RunSyncButton({
         top: openAbove ? "auto" : rect.bottom + 6,
         bottom: openAbove ? window.innerHeight - rect.top + 6 : "auto",
       });
+      focusIndexOnOpenRef.current = focusIndex;
     } else {
       setMenuStyle({});
     }
     setOpen((value) => !value);
+  };
+
+  const openMenuFromKeyboard = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    focusIndex: number,
+  ) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    if (!open) {
+      toggleMenu(focusIndex);
+    } else {
+      menuItemRefs.current[focusIndex]?.focus();
+    }
+  };
+
+  const handleMenuKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    itemIndex: number,
+  ) => {
+    const lastIndex = menuItemRefs.current.length - 1;
+    let nextIndex: number | null = null;
+
+    if (event.key === "ArrowDown") nextIndex = (itemIndex + 1) % (lastIndex + 1);
+    if (event.key === "ArrowUp") nextIndex = (itemIndex - 1 + lastIndex + 1) % (lastIndex + 1);
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = lastIndex;
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      menuItemRefs.current[nextIndex]?.focus();
+      return;
+    }
+
+    if (event.key === "Escape" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      optionsButtonRef.current?.focus();
+      return;
+    }
+
+    if (event.key === "Tab") setOpen(false);
   };
 
   const buttonStyle: React.CSSProperties = {
@@ -91,11 +147,13 @@ export default function RunSyncButton({
         <RefreshCw size={13} /> {label}
       </button>
       <button
+        ref={optionsButtonRef}
         type="button"
         aria-label={`${label} options`}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={toggleMenu}
+        onClick={() => toggleMenu(0)}
+        onKeyDown={(event) => openMenuFromKeyboard(event, event.key === "ArrowUp" ? 1 : 0)}
         disabled={pending}
         style={{
           ...buttonStyle,
@@ -121,8 +179,14 @@ export default function RunSyncButton({
           }}
         >
           <button
+            ref={(element) => {
+              menuItemRefs.current[0] = element;
+            }}
             type="button"
             role="menuitem"
+            tabIndex={-1}
+            className={styles.menuItem}
+            onKeyDown={(event) => handleMenuKeyDown(event, 0)}
             onClick={() => {
               setOpen(false);
               onRun("normal");
@@ -152,8 +216,14 @@ export default function RunSyncButton({
             </span>
           </button>
           <button
+            ref={(element) => {
+              menuItemRefs.current[1] = element;
+            }}
             type="button"
             role="menuitem"
+            tabIndex={-1}
+            className={styles.menuItem}
+            onKeyDown={(event) => handleMenuKeyDown(event, 1)}
             onClick={() => {
               setOpen(false);
               onRun("full");

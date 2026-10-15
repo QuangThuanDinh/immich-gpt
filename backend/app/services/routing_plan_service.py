@@ -50,16 +50,40 @@ class RoutingPlanService:
             .first()
         )
 
-    def list_plans(self, status: Optional[str] = None) -> List[RoutingPlan]:
+    def list_plans(
+        self,
+        status: Optional[str] = None,
+        archived: bool = False,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> tuple[List[RoutingPlan], bool]:
         q = self.db.query(RoutingPlan).filter(RoutingPlan.user_id == self.user_id)
         if status:
             q = q.filter(RoutingPlan.status == status)
-        plans = q.order_by(RoutingPlan.created_at.desc()).all()
-        return [
-            plan
-            for plan in plans
-            if not (plan.scope_json or {}).get("review_only", False)
-        ]
+        q = q.filter(RoutingPlan.archived.is_(archived))
+        q = q.filter(
+            func.coalesce(
+                RoutingPlan.scope_json["review_only"].as_boolean(),
+                False,
+            ).is_(False)
+        )
+        plans = (
+            q.order_by(RoutingPlan.created_at.desc(), RoutingPlan.id.desc())
+            .offset(offset)
+            .limit(limit + 1)
+            .all()
+        )
+        return plans[:limit], len(plans) > limit
+
+    def set_archived(self, plan_id: str, archived: bool) -> Optional[RoutingPlan]:
+        plan = self.get_plan(plan_id)
+        if not plan:
+            return None
+        plan.archived = archived
+        plan.updated_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(plan)
+        return plan
 
     def delete_plan(self, plan_id: str) -> bool:
         plan = self.get_plan(plan_id)

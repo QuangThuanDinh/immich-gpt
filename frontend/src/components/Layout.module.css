@@ -65,6 +65,15 @@
   background: rgba(255,255,255,0.04);
 }
 
+.navLink:focus {
+  outline: none;
+}
+
+.navLink:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
 .navLinkActive {
   font-weight: 600;
   color: var(--accent);

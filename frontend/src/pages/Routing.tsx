@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getRoutingTree,
@@ -15,6 +15,7 @@ import RoutingTreeTransferMenu from "../components/RoutingTreeTransferMenu";
 import RunRoutingButton from "../components/RunRoutingButton";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import masterDetail from "../styles/MasterDetail.module.css";
+import styles from "./Routing.module.css";
 import {
   Plus,
   Trash2,
@@ -45,6 +46,11 @@ interface NodeRowProps {
   onAddChild: (parentId: string) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
+  focusedId: string | null;
+  onFocusNode: (id: string) => void;
+  onNodeKeyDown: (node: RoutingNode, event: React.KeyboardEvent<HTMLDivElement>) => void;
+  onFocusNextNode: (id: string) => void;
+  registerNode: (id: string, element: HTMLDivElement | null) => void;
 }
 
 function NodeRow({
@@ -57,15 +63,69 @@ function NodeRow({
   onAddChild,
   onDuplicate,
   onDelete,
+  focusedId,
+  onFocusNode,
+  onNodeKeyDown,
+  onFocusNextNode,
+  registerNode,
 }: NodeRowProps) {
   const hasChildren = (node.children?.length ?? 0) > 0;
   const isOpen = expanded.has(node.id);
   const isLeaf = node.is_leaf;
   const isSelected = selectedId === node.id;
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const handleRowKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+      event.preventDefault();
+      const buttons = buttonRefs.current.filter(
+        (button): button is HTMLButtonElement => button !== null,
+      );
+      const target = event.key === "ArrowRight" ? buttons[0] : buttons[buttons.length - 1];
+      target?.focus();
+      return;
+    }
+    onNodeKeyDown(node, event);
+  };
+
+  const handleButtonKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    buttonIndex: number,
+  ) => {
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      rowRef.current?.focus();
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (buttonIndex === 0) rowRef.current?.focus();
+      else buttonRefs.current[buttonIndex - 1]?.focus();
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      const nextButton = buttonRefs.current[buttonIndex + 1];
+      if (nextButton) nextButton.focus();
+      else onFocusNextNode(node.id);
+    }
+  };
 
   return (
-    <>
+    <div role="none">
       <div
+        ref={(element) => {
+          rowRef.current = element;
+          registerNode(node.id, element);
+        }}
+        role="treeitem"
+        aria-label={node.name}
+        aria-selected={isSelected}
+        aria-expanded={hasChildren ? isOpen : undefined}
+        aria-level={depth + 1}
+        tabIndex={focusedId === node.id ? 0 : -1}
+        className={styles.nodeRow}
         style={{
           display: "flex",
           alignItems: "center",
@@ -77,12 +137,21 @@ function NodeRow({
           opacity: node.enabled ? 1 : 0.55,
           marginBottom: 2,
         }}
-        onClick={() => onSelect(node.id)}
+        onFocus={() => onFocusNode(node.id)}
+        onKeyDown={handleRowKeyDown}
+        onClick={() => {
+          onFocusNode(node.id);
+          onSelect(node.id);
+        }}
       >
         {hasChildren ? (
           <button
+            ref={(element) => { buttonRefs.current[0] = element; }}
             type="button"
+            tabIndex={-1}
             aria-label={isOpen ? `Collapse ${node.name}` : `Expand ${node.name}`}
+            className={styles.nodeActionButton}
+            onKeyDown={(event) => handleButtonKeyDown(event, 0)}
             onClick={(e) => {
               e.stopPropagation();
               toggle(node.id);
@@ -132,21 +201,39 @@ function NodeRow({
         )}
         <div style={{ display: "flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
           <button
+            ref={(element) => { buttonRefs.current[hasChildren ? 1 : 0] = element; }}
+            type="button"
+            tabIndex={-1}
+            aria-label={`Add child to ${node.name}`}
             title="Add child"
+            className={styles.nodeActionButton}
+            onKeyDown={(event) => handleButtonKeyDown(event, hasChildren ? 1 : 0)}
             onClick={() => onAddChild(node.id)}
             style={{ padding: 4, background: "transparent", border: "none", color: "#64748b", cursor: "pointer" }}
           >
             <Plus size={13} />
           </button>
           <button
+            ref={(element) => { buttonRefs.current[hasChildren ? 2 : 1] = element; }}
+            type="button"
+            tabIndex={-1}
+            aria-label={`Duplicate ${node.name}`}
             title="Duplicate"
+            className={styles.nodeActionButton}
+            onKeyDown={(event) => handleButtonKeyDown(event, hasChildren ? 2 : 1)}
             onClick={() => onDuplicate(node.id)}
             style={{ padding: 4, background: "transparent", border: "none", color: "#64748b", cursor: "pointer" }}
           >
             <Copy size={13} />
           </button>
           <button
+            ref={(element) => { buttonRefs.current[hasChildren ? 3 : 2] = element; }}
+            type="button"
+            tabIndex={-1}
+            aria-label={`Delete ${node.name}`}
             title="Delete"
+            className={styles.nodeActionButton}
+            onKeyDown={(event) => handleButtonKeyDown(event, hasChildren ? 3 : 2)}
             onClick={() => onDelete(node.id)}
             style={{ padding: 4, background: "transparent", border: "none", color: "#ef4444", cursor: "pointer" }}
           >
@@ -154,21 +241,30 @@ function NodeRow({
           </button>
         </div>
       </div>
-      {isOpen && hasChildren && node.children!.map((child) => (
-        <NodeRow
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          expanded={expanded}
-          toggle={toggle}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          onAddChild={onAddChild}
-          onDuplicate={onDuplicate}
-          onDelete={onDelete}
-        />
-      ))}
-    </>
+      {isOpen && hasChildren && (
+        <div role="group">
+          {node.children!.map((child) => (
+            <NodeRow
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              expanded={expanded}
+              toggle={toggle}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              onAddChild={onAddChild}
+              onDuplicate={onDuplicate}
+              onDelete={onDelete}
+              focusedId={focusedId}
+              onFocusNode={onFocusNode}
+              onNodeKeyDown={onNodeKeyDown}
+              onFocusNextNode={onFocusNextNode}
+              registerNode={registerNode}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -179,9 +275,15 @@ export default function Routing() {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const nodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [transferError, setTransferError] = useState<string | null>(null);
 
   const flat = useMemo(() => flatten(tree), [tree]);
+  const visibleNodes = useMemo(() => flattenVisible(tree, expanded), [tree, expanded]);
+  const activeFocusedNodeId = visibleNodes.some((node) => node.id === focusedNodeId)
+    ? focusedNodeId
+    : visibleNodes[0]?.id ?? null;
   const selected = flat.find((n) => n.id === selectedId) ?? null;
 
   const [creatingUnder, setCreatingUnder] = useState<string | null | undefined>(undefined);
@@ -229,6 +331,53 @@ export default function Routing() {
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setExpanded(next);
+  };
+
+  const focusNode = (id: string) => {
+    setFocusedNodeId(id);
+    nodeRefs.current[id]?.focus();
+  };
+
+  const handleNodeKeyDown = (
+    node: RoutingNode,
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (event.target !== event.currentTarget) return;
+    const index = visibleNodes.findIndex((visible) => visible.id === node.id);
+    if (index < 0) return;
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setSelectedId(node.id);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusNode(visibleNodes[(index + 1) % visibleNodes.length].id);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusNode(visibleNodes[(index - 1 + visibleNodes.length) % visibleNodes.length].id);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      focusNode(visibleNodes[0].id);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      focusNode(visibleNodes[visibleNodes.length - 1].id);
+      return;
+    }
+  };
+
+  const focusNextNode = (nodeId: string) => {
+    const index = visibleNodes.findIndex((node) => node.id === nodeId);
+    if (index >= 0 && index < visibleNodes.length - 1) {
+      focusNode(visibleNodes[index + 1].id);
+    }
   };
 
   const handleAddRoot = () => {
@@ -331,20 +480,27 @@ export default function Routing() {
               No routing destinations yet. Click "Add Root" to create your first one.
             </div>
           ) : (
-            tree.map((n) => (
-              <NodeRow
-                key={n.id}
-                node={n}
-                depth={0}
-                expanded={expanded}
-                toggle={toggle}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                onAddChild={handleAddChild}
-                onDuplicate={(id) => dupMut.mutate(id)}
-                onDelete={handleDelete}
-              />
-            ))
+            <div role="tree" aria-label="Routing destinations">
+              {tree.map((n) => (
+                <NodeRow
+                  key={n.id}
+                  node={n}
+                  depth={0}
+                  expanded={expanded}
+                  toggle={toggle}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onAddChild={handleAddChild}
+                  onDuplicate={(id) => dupMut.mutate(id)}
+                  onDelete={handleDelete}
+                  focusedId={activeFocusedNodeId}
+                  onFocusNode={setFocusedNodeId}
+                  onNodeKeyDown={handleNodeKeyDown}
+                  onFocusNextNode={focusNextNode}
+                  registerNode={(id, element) => { nodeRefs.current[id] = element; }}
+                />
+              ))}
+            </div>
           )}
 
           {creatingUnder !== undefined && (
@@ -430,6 +586,18 @@ function flatten(nodes: RoutingNode[]): RoutingNode[] {
   };
   nodes.forEach(walk);
   return out;
+}
+
+function flattenVisible(nodes: RoutingNode[], expanded: Set<string>): RoutingNode[] {
+  const visible: RoutingNode[] = [];
+  const walk = (node: RoutingNode) => {
+    visible.push(node);
+    if (expanded.has(node.id)) {
+      (node.children ?? []).forEach(walk);
+    }
+  };
+  nodes.forEach(walk);
+  return visible;
 }
 
 function enabledLeafPaths(nodes: RoutingNode[], ancestorsEnabled = true): string[] {

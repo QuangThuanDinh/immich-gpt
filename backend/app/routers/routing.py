@@ -18,7 +18,7 @@ from ..models.asset import Asset
 from ..schemas.bucket import (
     RoutingNodeCreate, RoutingNodeUpdate, RoutingNodeOut, RoutingNodeMove,
     RoutingExampleCreate, RoutingExampleOut,
-    RoutingPlanOut, RoutingPlanItemOut,
+    RoutingPlanOut, RoutingPlanPage, RoutingPlanArchiveRequest, RoutingPlanItemOut,
     RoutingClassifyRequest,
     RoutingTreeTransfer,
     PlanItemMoveRequest, PlanItemActionRequest, PlanItemUpdateRequest,
@@ -367,21 +367,35 @@ def _plan_to_out(plan: RoutingPlan, item_count: int) -> RoutingPlanOut:
         scope=plan.scope_json or {},
         summary=plan.summary_json or {},
         item_count=item_count,
+        archived=bool(plan.archived),
         created_at=plan.created_at,
         updated_at=plan.updated_at or plan.created_at,
     )
 
 
-@router.get("/plans", response_model=List[RoutingPlanOut])
+@router.get("/plans", response_model=RoutingPlanPage)
 def list_plans(
     status: Optional[str] = None,
+    archived: bool = False,
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user=Depends(require_active_user),
 ):
     svc = RoutingPlanService(db, current_user.id)
-    plans = svc.list_plans(status=status)
+    plans, has_more = svc.list_plans(
+        status=status,
+        archived=archived,
+        limit=limit,
+        offset=offset,
+    )
     counts = svc.item_counts_by_plan([p.id for p in plans])
-    return [_plan_to_out(p, counts.get(p.id, 0)) for p in plans]
+    return RoutingPlanPage(
+        items=[_plan_to_out(p, counts.get(p.id, 0)) for p in plans],
+        has_more=has_more,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/plans/{plan_id}", response_model=RoutingPlanOut)
@@ -407,6 +421,20 @@ def delete_plan(
     if not RoutingPlanService(db, current_user.id).delete_plan(plan_id):
         raise HTTPException(status_code=404, detail="Plan not found")
     return {"deleted": True}
+
+
+@router.patch("/plans/{plan_id}/archive", response_model=RoutingPlanOut)
+def archive_plan(
+    plan_id: str,
+    body: RoutingPlanArchiveRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_active_user),
+):
+    svc = RoutingPlanService(db, current_user.id)
+    plan = svc.set_archived(plan_id, body.archived)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return _plan_to_out(plan, len(svc.list_items(plan_id)))
 
 
 @router.get("/plans/{plan_id}/summary")

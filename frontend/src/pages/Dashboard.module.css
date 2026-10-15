@@ -19,6 +19,37 @@
   padding: 20px 24px;
   flex: 1;
   min-width: 140px;
+  text-decoration: none;
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.statCard:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.statCard:active {
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: none;
+}
+
+.statCard:focus {
+  outline: none;
+}
+
+.statCard:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.statCardWarning {
+  background: var(--color-warning-dim);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.statCardWarning:hover {
+  border-color: var(--color-warning);
 }
 
 .statCardHeader {
@@ -227,13 +258,6 @@
 .albumCount {
   font-size: var(--text-xs);
   color: var(--text-muted);
-}
-
-/* Action buttons row */
-.actionsRow {
-  display: flex;
-  gap: var(--space-3);
-  margin-bottom: var(--space-8);
 }
 
 /* Active job */

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -69,5 +69,53 @@ describe("AdminUsers", () => {
     expect(screen.getByTitle("Reset password")).toBeInTheDocument();
     expect(screen.getByTitle("Require password change")).toBeInTheDocument();
     expect(screen.getByTitle("Delete user")).toBeInTheDocument();
+  });
+
+  it("uses one Tab stop with parent and child arrow navigation", async () => {
+    vi.mocked(adminListUsers).mockResolvedValue([
+      {
+        id: "user-1",
+        email: "first@example.com",
+        username: "first",
+        role: "user",
+        is_active: true,
+        force_password_change: false,
+        created_at: "2026-05-05T10:00:00Z",
+      },
+      {
+        id: "user-2",
+        email: "second@example.com",
+        username: "second",
+        role: "user",
+        is_active: true,
+        force_password_change: false,
+        created_at: "2026-05-06T10:00:00Z",
+      },
+    ]);
+    renderPage();
+
+    const first = await screen.findByRole("row", { name: "User first" });
+    const second = screen.getByRole("row", { name: "User second" });
+    const firstDisable = within(first).getByRole("button", { name: "Disable" });
+    const firstReset = within(first).getByRole("button", { name: "Reset password" });
+    const firstDelete = within(first).getByRole("button", { name: "Delete user" });
+
+    expect(first).toHaveAttribute("tabindex", "0");
+    expect(second).toHaveAttribute("tabindex", "-1");
+    expect(firstDisable).toHaveAttribute("tabindex", "-1");
+
+    act(() => first.focus());
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(firstDisable).toHaveFocus();
+    fireEvent.keyDown(firstDisable, { key: "ArrowRight" });
+    expect(firstReset).toHaveFocus();
+    fireEvent.keyDown(firstReset, { key: "ArrowUp" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "ArrowLeft" });
+    expect(firstDelete).toHaveFocus();
+    fireEvent.keyDown(firstDelete, { key: "ArrowRight" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "ArrowDown" });
+    expect(first).toHaveFocus();
   });
 });

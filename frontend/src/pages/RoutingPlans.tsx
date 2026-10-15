@@ -1,11 +1,13 @@
-import React, { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useRef, useState } from "react";
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import {
-  listRoutingPlans,
+  listRoutingPlansPage,
   getRoutingPlanSummary,
   listRoutingNodes,
   applyRoutingPlan,
   startRoutingClassify,
+  archiveRoutingPlan,
 } from "../services/api";
 import type { RoutingPlanSummary, RoutingPlanGroupItem } from "../types";
 import { usePageVisible } from "../hooks/usePageVisible";
@@ -14,8 +16,14 @@ import RoutingPlanGroup from "../components/RoutingPlanGroup";
 import AssetDetailPanel from "../components/AssetDetailPanel";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import masterDetail from "../styles/MasterDetail.module.css";
-import { CheckCircle2, AlertTriangle, Trash2, XCircle, Clock, ChevronLeft, type LucideIcon } from "lucide-react";
+import styles from "./RoutingPlans.module.css";
+import {
+  Archive, ArchiveRestore, CheckCircle2, AlertTriangle, Trash2,
+  XCircle, Clock, ChevronLeft, type LucideIcon,
+} from "lucide-react";
 import { useTimezone } from "../hooks/useTimezone";
+
+const PLAN_PAGE_SIZE = 10;
 
 const GROUP_DEFS: {
   key: keyof RoutingPlanSummary["groups"];
@@ -31,21 +39,76 @@ const GROUP_DEFS: {
   { key: "failed", label: "Failed", color: "#ef4444", icon: XCircle },
 ];
 
+function PlanStatusIcon({ status }: { status: string }) {
+  if (status === "applied") {
+    return (
+      <span role="img" aria-label="Finished plan" title="Finished">
+        <CheckCircle2 size={12} color="#22c55e" />
+      </span>
+    );
+  }
+  if (status === "partially_applied") {
+    return (
+      <span role="img" aria-label="Partially applied plan" title="Partially applied">
+        <AlertTriangle size={12} color="#f59e0b" />
+      </span>
+    );
+  }
+  return (
+    <span role="img" aria-label={`${status} plan`} title={status}>
+      <Clock size={12} color="#64748b" />
+    </span>
+  );
+}
+
 export default function RoutingPlans() {
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { formatDateTime } = useTimezone();
   const pageVisible = usePageVisible();
-  const { data: plans = [] } = useQuery({ queryKey: ["routing-plans"], queryFn: () => listRoutingPlans() });
+  const [archiveMode, setArchiveMode] = useState(false);
+  const [focusedArchiveTab, setFocusedArchiveTab] = useState(false);
+  const recentTabRef = useRef<HTMLButtonElement | null>(null);
+  const archivedTabRef = useRef<HTMLButtonElement | null>(null);
+  const [focusedPlanId, setFocusedPlanId] = useState<string | null>(null);
+  const planRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const archiveButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const {
+    data: planPages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ["routing-plans", { archived: archiveMode }],
+    queryFn: ({ pageParam }) => listRoutingPlansPage({
+      archived: archiveMode,
+      limit: PLAN_PAGE_SIZE,
+      offset: pageParam,
+    }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => (
+      lastPage.has_more
+        ? lastPage.offset + lastPage.items.length
+        : undefined
+    ),
+  });
+  const plans = planPages?.pages.flatMap((page) => page.items) ?? [];
+  const activeFocusedPlanId = plans.some((plan) => plan.id === focusedPlanId)
+    ? focusedPlanId
+    : plans[0]?.id ?? null;
   const { data: routingNodes = [] } = useQuery({
     queryKey: ["routing-nodes"],
     queryFn: listRoutingNodes,
   });
   const destinations = routingNodes.filter((node) => node.is_leaf && node.enabled);
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(
+    searchParams.get("plan"),
+  );
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const closePlan = () => {
     setSelectedPlanId(null);
+    setSearchParams({}, { replace: true });
     setExpandedGroupId(null);
     setSelectedAssetId(null);
   };
@@ -72,6 +135,39 @@ export default function RoutingPlans() {
       qc.invalidateQueries({ queryKey: ["routing-plans"] });
     },
   });
+
+  const archiveMut = useMutation({
+    mutationFn: ({ planId, archived }: { planId: string; archived: boolean }) =>
+      archiveRoutingPlan(planId, archived),
+    onSuccess: (plan) => {
+      if (selectedPlanId === plan.id) closePlan();
+      qc.invalidateQueries({ queryKey: ["routing-plans"] });
+    },
+  });
+
+  const changeArchiveMode = (archived: boolean) => {
+    closePlan();
+    setFocusedArchiveTab(archived);
+    setArchiveMode(archived);
+  };
+
+  const moveArchiveTabFocus = (archived: boolean) => {
+    setFocusedArchiveTab(archived);
+    (archived ? archivedTabRef.current : recentTabRef.current)?.focus();
+  };
+
+  const selectPlan = (planId: string) => {
+    applyMut.reset();
+    setSelectedPlanId(planId);
+    setSearchParams({ plan: planId }, { replace: true });
+    setExpandedGroupId(null);
+    setSelectedAssetId(null);
+  };
+
+  const focusPlan = (planId: string) => {
+    setFocusedPlanId(planId);
+    planRefs.current[planId]?.focus();
+  };
 
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1400 }}>
@@ -100,30 +196,134 @@ export default function RoutingPlans() {
           background: "#0f172a", border: "1px solid #1e293b",
           borderRadius: 12, padding: 16,
         }}>
-          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
-            Recent plans
+          <div
+            role="tablist"
+            aria-label="Plan history"
+            style={{
+              display: "flex",
+              gap: 18,
+              marginBottom: 12,
+              borderBottom: "1px solid #334155",
+            }}
+          >
+            <button
+              ref={recentTabRef}
+              type="button"
+              role="tab"
+              tabIndex={!focusedArchiveTab ? 0 : -1}
+              onClick={() => changeArchiveMode(false)}
+              onFocus={() => setFocusedArchiveTab(false)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                  event.preventDefault();
+                  moveArchiveTabFocus(true);
+                }
+              }}
+              aria-selected={!archiveMode}
+              style={{
+                padding: "7px 2px 8px",
+                border: "none",
+                borderBottom: !archiveMode ? "2px solid #3b82f6" : "2px solid transparent",
+                background: "transparent",
+                color: !archiveMode ? "#e2e8f0" : "#64748b",
+                fontSize: 12,
+                fontWeight: !archiveMode ? 600 : 500,
+                cursor: "pointer",
+                marginBottom: -1,
+              }}
+            >
+              Recent
+            </button>
+            <button
+              ref={archivedTabRef}
+              type="button"
+              role="tab"
+              tabIndex={focusedArchiveTab ? 0 : -1}
+              onClick={() => changeArchiveMode(true)}
+              onFocus={() => setFocusedArchiveTab(true)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                  event.preventDefault();
+                  moveArchiveTabFocus(false);
+                }
+              }}
+              aria-selected={archiveMode}
+              style={{
+                padding: "7px 2px 8px",
+                border: "none",
+                borderBottom: archiveMode ? "2px solid #3b82f6" : "2px solid transparent",
+                background: "transparent",
+                color: archiveMode ? "#e2e8f0" : "#64748b",
+                fontSize: 12,
+                fontWeight: archiveMode ? 600 : 500,
+                cursor: "pointer",
+                marginBottom: -1,
+              }}
+            >
+              Archived
+            </button>
           </div>
           {plans.length === 0 && (
-            <div style={{ color: "#475569", fontSize: 13 }}>No plans yet. Run a routing job first.</div>
+            <div style={{ color: "#475569", fontSize: 13 }}>
+              {archiveMode ? "No archived plans." : "No plans yet. Run a routing job first."}
+            </div>
           )}
-          {plans.map((p) => (
+          <div role="group" aria-label={archiveMode ? "Archived plans" : "Recent plans"}>
+          {plans.map((p, index) => (
             <div
               key={p.id}
+              ref={(element) => { planRefs.current[p.id] = element; }}
+              role="button"
+              tabIndex={activeFocusedPlanId === p.id ? 0 : -1}
+              aria-label={`Open ${p.status} plan from ${formatDateTime(p.created_at)}`}
+              onFocus={() => setFocusedPlanId(p.id)}
               onClick={() => {
-                applyMut.reset();
-                setSelectedPlanId(p.id);
-                setExpandedGroupId(null);
-                setSelectedAssetId(null);
+                setFocusedPlanId(p.id);
+                selectPlan(p.id);
               }}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  selectPlan(p.id);
+                  return;
+                }
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  focusPlan(plans[(index + 1) % plans.length].id);
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  focusPlan(plans[(index - 1 + plans.length) % plans.length].id);
+                  return;
+                }
+                if (event.key === "Home") {
+                  event.preventDefault();
+                  focusPlan(plans[0].id);
+                  return;
+                }
+                if (event.key === "End") {
+                  event.preventDefault();
+                  focusPlan(plans[plans.length - 1].id);
+                  return;
+                }
+                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                  event.preventDefault();
+                  archiveButtonRefs.current[p.id]?.focus();
+                }
+              }}
+              className={styles.planCard}
               style={{
-                padding: "10px 12px", borderRadius: 8, marginBottom: 6,
+                position: "relative",
+                padding: "10px 42px 10px 12px", borderRadius: 8, marginBottom: 6,
                 background: selectedPlanId === p.id ? "rgba(59,130,246,0.12)" : "#1e293b",
                 border: "1px solid #1e293b",
                 cursor: "pointer",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <Clock size={12} color="#64748b" />
+                <PlanStatusIcon status={p.status} />
                 <span style={{ fontSize: 12, color: "#e2e8f0" }}>
                   {formatDateTime(p.created_at)}
                 </span>
@@ -131,8 +331,50 @@ export default function RoutingPlans() {
               <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
                 {p.status} · {p.item_count} item{p.item_count === 1 ? "" : "s"}
               </div>
+              <button
+                ref={(element) => { archiveButtonRefs.current[p.id] = element; }}
+                type="button"
+                aria-label={archiveMode ? "Unarchive" : "Archive"}
+                title={archiveMode ? "Unarchive" : "Archive"}
+                tabIndex={-1}
+                disabled={archiveMut.isPending}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "ArrowLeft") {
+                    event.preventDefault();
+                    focusPlan(p.id);
+                    return;
+                  }
+                  if (event.key === "ArrowRight") {
+                    event.preventDefault();
+                    if (index < plans.length - 1) focusPlan(plans[index + 1].id);
+                  }
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  archiveMut.mutate({ planId: p.id, archived: !archiveMode });
+                }}
+                className={styles.archiveButton}
+              >
+                {archiveMode ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+              </button>
             </div>
           ))}
+          </div>
+          {hasNextPage && (
+            <button
+              type="button"
+              onClick={() => void fetchNextPage()}
+              disabled={isFetchingNextPage}
+              style={{
+                width: "100%", marginTop: 8, padding: "8px 12px",
+                borderRadius: 7, border: "1px solid #334155",
+                background: "transparent", color: "#94a3b8",
+                fontSize: 12, cursor: isFetchingNextPage ? "wait" : "pointer",
+              }}
+            >
+              {isFetchingNextPage ? "Loading..." : "Load more"}
+            </button>
+          )}
         </div>
 
         <div className={[masterDetail.detail, selectedPlanId ? "" : masterDetail.detailHidden].join(" ")}>

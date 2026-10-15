@@ -222,8 +222,16 @@ export interface RoutingPlan {
   scope?: Record<string, unknown> | null;
   summary?: Record<string, unknown> | null;
   item_count: number;
+  archived: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface RoutingPlanPage {
+  items: RoutingPlan[];
+  has_more: boolean;
+  limit: number;
+  offset: number;
 }
 
 export interface RoutingPlanItem {

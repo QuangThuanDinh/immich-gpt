@@ -58,6 +58,7 @@ function delay(milliseconds: number) {
 
 export default function AssetAiQueryPanel({ assetId, assetName, assetPreview, onClose }: Props) {
   const queryClient = useQueryClient();
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const [run, setRun] = React.useState<{ jobId: string; planId: string } | null>(null);
   const [item, setItem] = React.useState<RoutingPlanItem | null>(null);
   const [destinationId, setDestinationId] = React.useState("");
@@ -66,6 +67,13 @@ export default function AssetAiQueryPanel({ assetId, assetName, assetPreview, on
   const [tags, setTags] = React.useState("");
   const [location, setLocation] = React.useState("");
   const [closeRequested, setCloseRequested] = React.useState(false);
+
+  React.useLayoutEffect(() => {
+    const firstFocusable = panelRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), select:not([disabled]), textarea:not([disabled]), input:not([disabled]), a[href]',
+    );
+    firstFocusable?.focus();
+  }, [item]);
 
   const startMutation = useMutation({
     mutationFn: () => startRoutingClassify({
@@ -235,6 +243,7 @@ export default function AssetAiQueryPanel({ assetId, assetName, assetPreview, on
   if (!item) {
     return (
       <div
+        ref={panelRef}
         role="status"
         aria-label="AI Query loading"
         style={{
@@ -283,6 +292,7 @@ export default function AssetAiQueryPanel({ assetId, assetName, assetPreview, on
 
   return (
     <div
+      ref={panelRef}
       role="region"
       aria-label="AI Query result"
       style={{

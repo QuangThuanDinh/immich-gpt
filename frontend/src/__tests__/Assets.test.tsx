@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -9,6 +9,7 @@ vi.mock("../services/api", () => ({
   getAssets: vi.fn(),
   getAsset: vi.fn(),
   getAssetCount: vi.fn(),
+  startSyncJob: vi.fn(),
   refreshAssetMetadata: vi.fn(),
   startRoutingClassify: vi.fn(),
   getJob: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("../services/api", () => ({
 import {
   getAssets,
   getAssetCount,
+  startSyncJob,
   refreshAssetMetadata,
   startRoutingClassify,
   getJob,
@@ -72,6 +74,7 @@ describe("Assets page", () => {
       },
     ]);
     vi.mocked(getAssetCount).mockResolvedValue({ count: 1 });
+    vi.mocked(startSyncJob).mockResolvedValue({ job_id: "sync-job", status: "queued" });
     vi.mocked(startRoutingClassify).mockResolvedValue({
       job_id: "job-1",
       plan_id: "plan-1",
@@ -178,6 +181,7 @@ describe("Assets page", () => {
         expect.objectContaining({ page: 1, page_size: 24 })
       );
     });
+
     const page = screen.getByTestId("assets-page");
     expect(page).toHaveStyle({ maxWidth: "1400px" });
     expect(page.style.margin).toBe("");
@@ -185,6 +189,165 @@ describe("Assets page", () => {
       gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
       gap: "12px",
     });
+  });
+
+  it("places Quick, Normal, and Full Sync actions in the page header", async () => {
+    renderPage();
+
+    expect(await screen.findByTestId("assets-header")).toHaveStyle({
+      justifyContent: "space-between",
+    });
+    expect(
+      within(screen.getByTestId("assets-header-actions"))
+        .getByRole("button", { name: "Quick Sync" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick Sync" }));
+    await waitFor(() => expect(startSyncJob).toHaveBeenLastCalledWith({
+      scope: "all",
+      run_routing_after: false,
+      quick_sync: true,
+      full_sync: false,
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick Sync options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Normal Sync/i }));
+    await waitFor(() => expect(startSyncJob).toHaveBeenLastCalledWith({
+      scope: "all",
+      run_routing_after: false,
+      quick_sync: false,
+      full_sync: false,
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick Sync options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Full Sync/i }));
+    await waitFor(() => expect(startSyncJob).toHaveBeenLastCalledWith({
+      scope: "all",
+      run_routing_after: false,
+      quick_sync: false,
+      full_sync: true,
+    }));
+  });
+
+  it("supports arrow-key navigation in the sync submenu", async () => {
+    renderPage();
+
+    const options = await screen.findByRole("button", { name: "Quick Sync options" });
+    options.focus();
+    fireEvent.keyDown(options, { key: "ArrowDown" });
+
+    const normal = screen.getByRole("menuitem", { name: /Normal Sync/i });
+    const full = screen.getByRole("menuitem", { name: /Full Sync/i });
+    await waitFor(() => expect(normal).toHaveFocus());
+    expect(normal).toHaveAttribute("tabindex", "-1");
+    expect(full).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.keyDown(normal, { key: "ArrowDown" });
+    expect(full).toHaveFocus();
+    fireEvent.keyDown(full, { key: "ArrowDown" });
+    expect(normal).toHaveFocus();
+    fireEvent.keyDown(normal, { key: "ArrowUp" });
+    expect(full).toHaveFocus();
+    fireEvent.keyDown(full, { key: "Home" });
+    expect(normal).toHaveFocus();
+    fireEvent.keyDown(normal, { key: "End" });
+    expect(full).toHaveFocus();
+
+    fireEvent.keyDown(full, { key: "Escape" });
+    expect(options).toHaveFocus();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("supports one-Tab wrapped keyboard navigation through asset cards", async () => {
+    vi.mocked(getAssets).mockResolvedValue([
+      {
+        id: "asset-1",
+        immich_id: "immich-1",
+        original_filename: "first.jpg",
+        asset_type: "IMAGE",
+        is_favorite: false,
+        is_archived: false,
+        is_external_library: false,
+        created_at: "2026-05-05T10:00:00Z",
+      },
+      {
+        id: "asset-2",
+        immich_id: "immich-2",
+        original_filename: "second.jpg",
+        asset_type: "IMAGE",
+        is_favorite: false,
+        is_archived: false,
+        is_external_library: false,
+        created_at: "2026-05-04T10:00:00Z",
+      },
+    ]);
+    renderPage();
+
+    const first = await screen.findByRole("button", { name: "Open asset first.jpg" });
+    const second = screen.getByRole("button", { name: "Open asset second.jpg" });
+    expect(first).toHaveAttribute("tabindex", "0");
+    expect(second).toHaveAttribute("tabindex", "-1");
+
+    act(() => first.focus());
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(second).toHaveFocus();
+    expect(second).toHaveAttribute("tabindex", "0");
+    expect(first).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.keyDown(second, { key: "ArrowRight" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "ArrowLeft" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "Home" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "End" });
+    expect(second).toHaveFocus();
+
+    fireEvent.keyDown(second, { key: "Enter" });
+    expect(document.body.style.overflow).toBe("hidden");
+  });
+
+  it("uses one Tab stop and arrow navigation for asset sort buttons", async () => {
+    renderPage();
+
+    const sortGroup = await screen.findByRole("group", { name: "Sort assets" });
+    const date = within(sortGroup).getByRole("button", { name: "Date" });
+    const filename = within(sortGroup).getByRole("button", { name: "Filename" });
+    const location = within(sortGroup).getByRole("button", { name: "Location" });
+    const type = within(sortGroup).getByRole("button", { name: "Type" });
+
+    expect(date).toHaveAttribute("tabindex", "0");
+    expect(filename).toHaveAttribute("tabindex", "-1");
+    expect(location).toHaveAttribute("tabindex", "-1");
+    expect(type).toHaveAttribute("tabindex", "-1");
+
+    act(() => date.focus());
+    fireEvent.keyDown(date, { key: "ArrowLeft" });
+    expect(type).toHaveFocus();
+    fireEvent.keyDown(type, { key: "ArrowRight" });
+    expect(date).toHaveFocus();
+    fireEvent.keyDown(date, { key: "End" });
+    expect(type).toHaveFocus();
+    fireEvent.keyDown(type, { key: "Home" });
+    expect(date).toHaveFocus();
+  });
+
+  it("moves focus into the asset side pane and restores it when closed", async () => {
+    renderPage();
+
+    const assetCard = await screen.findByRole("button", {
+      name: "Open asset photo.jpg",
+    });
+    act(() => assetCard.focus());
+    fireEvent.click(assetCard);
+
+    const closeButton = await screen.findByRole("button", {
+      name: "Close asset details",
+    });
+    await waitFor(() => expect(closeButton).toHaveFocus());
+
+    fireEvent.click(closeButton);
+    await waitFor(() => expect(assetCard).toHaveFocus());
   });
 
   it("shows synced tags and people in the asset side pane", async () => {
@@ -419,13 +582,17 @@ describe("Assets page", () => {
     renderPage();
 
     fireEvent.click(await screen.findByText("photo.jpg"));
-    fireEvent.click(screen.getByRole("button", { name: "AI Query" }));
+    const aiQueryButton = screen.getByRole("button", { name: "AI Query" });
+    fireEvent.click(aiQueryButton);
     await screen.findByDisplayValue("Original AI description");
-    fireEvent.click(screen.getByRole("button", { name: "Back to asset metadata" }));
+    const backButton = screen.getByRole("button", { name: "Back to asset metadata" });
+    expect(backButton).toHaveFocus();
+    fireEvent.click(backButton);
 
     await waitFor(() => {
       expect(deleteRoutingPlan).toHaveBeenCalledWith("plan-1");
       expect(screen.queryByRole("region", { name: "AI Query result" })).not.toBeInTheDocument();
+      expect(aiQueryButton).toHaveFocus();
     });
     expect(cancelJob).not.toHaveBeenCalled();
   });

@@ -18,6 +18,9 @@ export default function RunRoutingButton({
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const optionsButtonRef = useRef<HTMLButtonElement>(null);
+  const menuItemRef = useRef<HTMLButtonElement>(null);
+  const focusItemOnOpenRef = useRef(false);
   const background = primary ? "#1e40af" : "#1e293b";
   const color = primary ? "white" : "#22c55e";
 
@@ -30,7 +33,10 @@ export default function RunRoutingButton({
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        optionsButtonRef.current?.focus();
+      }
     };
 
     document.addEventListener("mousedown", closeOnOutsideClick);
@@ -39,6 +45,13 @@ export default function RunRoutingButton({
       document.removeEventListener("mousedown", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (open && focusItemOnOpenRef.current) {
+      menuItemRef.current?.focus();
+      focusItemOnOpenRef.current = false;
+    }
   }, [open]);
 
   const toggleMenu = () => {
@@ -60,10 +73,39 @@ export default function RunRoutingButton({
         top: openAbove ? "auto" : rect.bottom + 6,
         bottom: openAbove ? window.innerHeight - rect.top + 6 : "auto",
       });
+      focusItemOnOpenRef.current = true;
     } else {
       setMenuStyle({});
     }
     setOpen((value) => !value);
+  };
+
+  const handleOptionsKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    if (!open) {
+      toggleMenu();
+    } else {
+      menuItemRef.current?.focus();
+    }
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      menuItemRef.current?.focus();
+      return;
+    }
+
+    if (event.key === "Escape" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      optionsButtonRef.current?.focus();
+      return;
+    }
+
+    if (event.key === "Tab") setOpen(false);
   };
 
   return (
@@ -89,11 +131,13 @@ export default function RunRoutingButton({
         <Play size={13} /> {label}
       </button>
       <button
+        ref={optionsButtonRef}
         type="button"
         aria-label={`${label} options`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={toggleMenu}
+        onKeyDown={handleOptionsKeyDown}
         disabled={pending}
         style={{
           display: "flex",
@@ -123,8 +167,12 @@ export default function RunRoutingButton({
           }}
         >
           <button
+            ref={menuItemRef}
             type="button"
             role="menuitem"
+            tabIndex={-1}
+            className={styles.menuItem}
+            onKeyDown={handleMenuKeyDown}
             onClick={() => {
               setOpen(false);
               onRun(true);

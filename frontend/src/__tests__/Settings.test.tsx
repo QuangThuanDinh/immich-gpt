@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import Settings from "../pages/Settings";
@@ -205,6 +205,51 @@ describe("Settings page", () => {
     });
     expect(await screen.findByText("✓ Current settings connected")).toBeInTheDocument();
     expect(upsertProvider).not.toHaveBeenCalled();
+  });
+
+  it("uses one Tab stop with arrow navigation for provider actions", async () => {
+    const provider = {
+      enabled: true,
+      is_default: false,
+      base_url: undefined,
+      model_name: "gpt-4o",
+      has_api_key: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    vi.mocked(getProviders).mockResolvedValue([
+      { ...provider, id: "openai-id", provider_name: "openai" },
+      { ...provider, id: "ollama-id", provider_name: "ollama" },
+    ]);
+    renderPage();
+
+    const first = await screen.findByRole("listitem", {
+      name: "AI provider openai",
+    });
+    const second = screen.getByRole("listitem", {
+      name: "AI provider ollama",
+    });
+    const testButton = within(first).getByRole("button", { name: "Test" });
+    const editButton = within(first).getByRole("button", { name: "Edit provider" });
+    const deleteButton = within(first).getByRole("button", { name: "Delete provider" });
+
+    expect(first).toHaveAttribute("tabindex", "0");
+    expect(second).toHaveAttribute("tabindex", "-1");
+    expect(testButton).toHaveAttribute("tabindex", "-1");
+
+    act(() => first.focus());
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(testButton).toHaveFocus();
+    fireEvent.keyDown(testButton, { key: "ArrowRight" });
+    expect(editButton).toHaveFocus();
+    fireEvent.keyDown(editButton, { key: "ArrowUp" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "ArrowLeft" });
+    expect(deleteButton).toHaveFocus();
+    fireEvent.keyDown(deleteButton, { key: "ArrowRight" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "ArrowDown" });
+    expect(first).toHaveFocus();
   });
 
   it("supports standard and Azure OpenAI configuration", async () => {

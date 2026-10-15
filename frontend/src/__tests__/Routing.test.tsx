@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -54,6 +54,19 @@ vi.mock("../services/api", () => ({
   startRoutingEvaluation: mocks.runEvaluationMock,
   runRoutingEvaluationItem: mocks.runEvaluationItemMock,
   listRoutingPlans: mocks.plansMock,
+  listRoutingPlansPage: async (...args: unknown[]) => {
+    const result = await mocks.plansMock(...args);
+    if (!Array.isArray(result)) return result;
+    const params = args[0] as { offset?: number } | undefined;
+    return {
+      items: result,
+      has_more: false,
+      limit: 10,
+      offset: params?.offset ?? 0,
+    };
+  },
+  archiveRoutingPlan: vi.fn((planId: string, archived: boolean) =>
+    Promise.resolve({ id: planId, archived })),
   getRoutingPlanSummary: mocks.planSummaryMock,
   getRoutingPlanItems: mocks.planItemsMock,
   updateRoutingPlanItem: mocks.updateItemMock,
@@ -93,6 +106,14 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={makeClient()}>
       <MemoryRouter>{children}</MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderWithRoute(children: React.ReactNode, route: string) {
+  return render(
+    <QueryClientProvider client={makeClient()}>
+      <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -732,8 +753,52 @@ describe("Routing tree page", () => {
 
     render(<Wrapper><Routing /></Wrapper>);
     await waitFor(() => expect(screen.getAllByText("Personal").length).toBeGreaterThan(0));
-    // Children render only after the parent is expanded; click chevron toggle.
-    expect(screen.getAllByText("Personal").length).toBeGreaterThan(0);
+    const parent = screen.getByRole("treeitem", { name: "Personal" });
+    expect(parent).toHaveAttribute("tabindex", "0");
+    act(() => parent.focus());
+
+    fireEvent.keyDown(parent, { key: "ArrowRight" });
+    const expand = screen.getByRole("button", { name: "Expand Personal" });
+    expect(expand).toHaveFocus();
+    expect(expand).toHaveAttribute("tabindex", "-1");
+    fireEvent.click(expand);
+
+    const child = await screen.findByRole("treeitem", { name: "Lake House" });
+    expect(parent).toHaveAttribute("aria-expanded", "true");
+
+    act(() => expand.focus());
+    fireEvent.keyDown(expand, { key: "ArrowRight" });
+    const addParentChild = screen.getByRole("button", { name: "Add child to Personal" });
+    expect(addParentChild).toHaveFocus();
+    expect(addParentChild).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(addParentChild, { key: "ArrowRight" });
+    const duplicateParent = screen.getByRole("button", { name: "Duplicate Personal" });
+    expect(duplicateParent).toHaveFocus();
+    fireEvent.keyDown(duplicateParent, { key: "ArrowRight" });
+    const deleteParent = screen.getByRole("button", { name: "Delete Personal" });
+    expect(deleteParent).toHaveFocus();
+    fireEvent.keyDown(deleteParent, { key: "ArrowRight" });
+    expect(child).toHaveFocus();
+
+    fireEvent.keyDown(child, { key: "ArrowRight" });
+    const addChild = screen.getByRole("button", { name: "Add child to Lake House" });
+    expect(addChild).toHaveFocus();
+    fireEvent.keyDown(addChild, { key: "ArrowLeft" });
+    expect(child).toHaveFocus();
+
+    fireEvent.keyDown(child, { key: "ArrowRight" });
+    fireEvent.keyDown(addChild, { key: "ArrowDown" });
+    expect(child).toHaveFocus();
+    fireEvent.keyDown(child, { key: "ArrowUp" });
+    expect(parent).toHaveFocus();
+    fireEvent.keyDown(parent, { key: "ArrowDown" });
+    expect(child).toHaveFocus();
+    fireEvent.keyDown(child, { key: "ArrowDown" });
+    expect(parent).toHaveFocus();
+    fireEvent.keyDown(parent, { key: "ArrowUp" });
+    expect(child).toHaveFocus();
+    fireEvent.keyDown(child, { key: "Enter" });
+    expect(child).toHaveAttribute("aria-selected", "true");
   });
 
   it("creates a new root node via the inline form", async () => {
@@ -812,6 +877,135 @@ describe("Routing plans page", () => {
     await waitFor(() => expect(screen.getByText(/No plans yet/i)).toBeInTheDocument());
   });
 
+  it("shows status icons for finished and partially applied plans", async () => {
+    plansMock.mockResolvedValue([
+      { id: "finished", job_id: null, status: "applied", item_count: 2,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { id: "partial", job_id: null, status: "partially_applied", item_count: 3,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+
+    expect(await screen.findByRole("img", { name: "Finished plan" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Partially applied plan" })).toBeInTheDocument();
+  });
+
+  it("uses one tab stop and arrow navigation for recent plans and archive actions", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: null, status: "ready", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { id: "p2", job_id: null, status: "applied", item_count: 2,
+        created_at: new Date(Date.now() - 1000).toISOString(), updated_at: new Date().toISOString() },
+    ]);
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+
+    const group = await screen.findByRole("group", { name: "Recent plans" });
+    const cards = await within(group).findAllByRole("button", { name: /Open .* plan from/i });
+    const archiveButtons = await within(group).findAllByRole("button", { name: "Archive" });
+    expect(cards[0]).toHaveAttribute("tabindex", "0");
+    expect(cards[1]).toHaveAttribute("tabindex", "-1");
+    expect(archiveButtons[0]).toHaveAttribute("tabindex", "-1");
+    expect(archiveButtons[1]).toHaveAttribute("tabindex", "-1");
+
+    act(() => cards[0].focus());
+    fireEvent.keyDown(cards[0], { key: "ArrowUp" });
+    expect(cards[1]).toHaveFocus();
+    fireEvent.keyDown(cards[1], { key: "ArrowDown" });
+    expect(cards[0]).toHaveFocus();
+
+    fireEvent.keyDown(cards[0], { key: "ArrowRight" });
+    expect(archiveButtons[0]).toHaveFocus();
+    fireEvent.keyDown(archiveButtons[0], { key: "ArrowRight" });
+    expect(cards[1]).toHaveFocus();
+
+    fireEvent.keyDown(cards[1], { key: "ArrowLeft" });
+    expect(archiveButtons[1]).toHaveFocus();
+    fireEvent.keyDown(archiveButtons[1], { key: "ArrowDown" });
+    expect(cards[1]).toHaveFocus();
+  });
+
+  it("loads routing plans ten at a time when requested", async () => {
+    const firstPlans = Array.from({ length: 10 }, (_, index) => ({
+      id: `p${index}`,
+      job_id: null,
+      status: "ready",
+      item_count: index + 1,
+      archived: false,
+      created_at: new Date(Date.now() - index * 1000).toISOString(),
+      updated_at: new Date(Date.now() - index * 1000).toISOString(),
+    }));
+    plansMock
+      .mockResolvedValueOnce({
+        items: firstPlans,
+        has_more: true,
+        limit: 10,
+        offset: 0,
+      })
+      .mockResolvedValueOnce({
+        items: [{
+          id: "p10",
+          job_id: null,
+          status: "applied",
+          item_count: 11,
+          archived: false,
+          created_at: new Date(Date.now() - 10_000).toISOString(),
+          updated_at: new Date(Date.now() - 10_000).toISOString(),
+        }],
+        has_more: false,
+        limit: 10,
+        offset: 10,
+      });
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+
+    await waitFor(() => expect(plansMock).toHaveBeenLastCalledWith({
+      archived: false,
+      limit: 10,
+      offset: 10,
+    }));
+    expect(await screen.findByText(/applied · 11 items/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
+  it("archives recent plans and can restore them from Archived mode", async () => {
+    const archiveRoutingPlan = await import("../services/api")
+      .then((module) => vi.mocked(module.archiveRoutingPlan));
+    const recentPlan = {
+      id: "p1",
+      job_id: null,
+      status: "ready",
+      item_count: 1,
+      archived: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    plansMock.mockImplementation(({ archived }: { archived?: boolean } = {}) =>
+      Promise.resolve(archived ? [{ ...recentPlan, archived: true }] : [recentPlan]));
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+
+    const recentTab = screen.getByRole("tab", { name: "Recent" });
+    const archivedTab = screen.getByRole("tab", { name: "Archived" });
+    expect(recentTab).toHaveAttribute("tabindex", "0");
+    expect(archivedTab).toHaveAttribute("tabindex", "-1");
+    act(() => recentTab.focus());
+    fireEvent.keyDown(recentTab, { key: "ArrowRight" });
+    expect(archivedTab).toHaveFocus();
+    fireEvent.keyDown(archivedTab, { key: "ArrowLeft" });
+    expect(recentTab).toHaveFocus();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(archiveRoutingPlan).toHaveBeenCalledWith("p1", true));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Unarchive" }));
+    await waitFor(() => expect(archiveRoutingPlan).toHaveBeenCalledWith("p1", false));
+  });
+
   it("runs only new assets from the primary plan action", async () => {
     plansMock.mockResolvedValue([]);
     render(<Wrapper><RoutingPlans /></Wrapper>);
@@ -819,6 +1013,57 @@ describe("Routing plans page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Run Routing" }));
 
     await waitFor(() => expect(classifyMock).toHaveBeenCalledWith({ force: false }));
+  });
+
+  it("opens a plan supplied by the dashboard shortcut", async () => {
+    plansMock.mockResolvedValue([
+      { id: "p1", job_id: "j1", status: "draft", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "p1",
+      total: 1,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [{ path: "Personal", bucket_id: "b1", count: 1, item_ids: ["i1"] }],
+        needs_review: [],
+        trash_candidates: [],
+        rejected: [],
+        failed: [],
+      },
+    });
+
+    renderWithRoute(<RoutingPlans />, "/routing/plans?plan=p1");
+
+    expect(await screen.findByText("Ready to approve")).toBeInTheDocument();
+    expect(planSummaryMock).toHaveBeenCalledWith("p1");
+  });
+
+  it("opens a focused plan card with the keyboard", async () => {
+    plansMock.mockResolvedValue([
+      { id: "keyboard-plan", job_id: null, status: "ready", item_count: 1,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ]);
+    planSummaryMock.mockResolvedValue({
+      plan_id: "keyboard-plan",
+      total: 1,
+      groups: {
+        auto_applied: [],
+        ready_to_approve: [],
+        needs_review: [],
+        trash_candidates: [],
+        rejected: [],
+        failed: [],
+      },
+    });
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+
+    const planCard = await screen.findByRole("button", { name: /Open ready plan from/i });
+    act(() => planCard.focus());
+    fireEvent.keyDown(planCard, { key: "Enter" });
+
+    await waitFor(() => expect(planSummaryMock).toHaveBeenCalledWith("keyboard-plan"));
+    expect(screen.getByRole("button", { name: "Back to plans" })).toBeInTheDocument();
   });
 
   it("shows plan summary groups when a plan is selected", async () => {

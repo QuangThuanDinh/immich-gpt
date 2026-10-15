@@ -162,6 +162,10 @@ function AiAssetPreview({ asset, imgError, onImageError }: {
 export default function AssetDetailPanel({ assetId, initialAsset, onClose }: Props) {
   const [imgError, setImgError] = React.useState(false);
   const [aiQueryOpen, setAiQueryOpen] = React.useState(false);
+  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
+  const aiQueryButtonRef = React.useRef<HTMLButtonElement>(null);
+  const restoreAiQueryFocusRef = React.useRef(false);
+  const previouslyFocusedElementRef = React.useRef<HTMLElement | null>(null);
   const { formatDateTime } = useTimezone();
   const queryClient = useQueryClient();
   const { data: asset, isLoading, isError } = useQuery<Asset>({
@@ -186,6 +190,24 @@ export default function AssetDetailPanel({ assetId, initialAsset, onClose }: Pro
   React.useEffect(() => {
     setImgError(false);
   }, [assetId]);
+
+  React.useLayoutEffect(() => {
+    previouslyFocusedElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+
+    return () => {
+      const previousElement = previouslyFocusedElementRef.current;
+      if (previousElement?.isConnected) previousElement.focus();
+    };
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!aiQueryOpen && restoreAiQueryFocusRef.current) {
+      restoreAiQueryFocusRef.current = false;
+      aiQueryButtonRef.current?.focus();
+    }
+  }, [aiQueryOpen]);
 
   React.useEffect(() => {
     const main = document.querySelector<HTMLElement>("main");
@@ -236,6 +258,7 @@ export default function AssetDetailPanel({ assetId, initialAsset, onClose }: Pro
             {asset?.original_filename || asset?.immich_id || "Asset metadata"}
           </div>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
             aria-label="Close asset details"
             style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", padding: 4 }}
@@ -344,6 +367,7 @@ export default function AssetDetailPanel({ assetId, initialAsset, onClose }: Pro
           flexShrink: 0,
         }}>
           <button
+            ref={aiQueryButtonRef}
             onClick={() => setAiQueryOpen(true)}
             disabled={aiQueryOpen}
             aria-label="AI Query"
@@ -401,7 +425,10 @@ export default function AssetDetailPanel({ assetId, initialAsset, onClose }: Pro
                 onImageError={() => setImgError(true)}
               />
             ) : null}
-            onClose={() => setAiQueryOpen(false)}
+            onClose={() => {
+              restoreAiQueryFocusRef.current = true;
+              setAiQueryOpen(false);
+            }}
           />
         )}
       </div>

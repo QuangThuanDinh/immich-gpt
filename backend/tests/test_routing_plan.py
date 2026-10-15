@@ -410,7 +410,71 @@ def test_review_only_plans_are_hidden_from_routing_plans(client, db):
     response = client.get("/api/routing/plans")
 
     assert response.status_code == 200
-    assert [plan["id"] for plan in response.json()] == [visible.id]
+    assert [plan["id"] for plan in response.json()["items"]] == [visible.id]
+
+
+def test_routing_plans_are_paged_archived_and_restored(client, db):
+    plans = [
+        RoutingPlan(
+            id=f"paged-plan-{index:02d}",
+            user_id=TEST_USER_ID,
+            status="ready",
+            scope_json={},
+        )
+        for index in range(12)
+    ]
+    archived = RoutingPlan(
+        id="archived-plan",
+        user_id=TEST_USER_ID,
+        status="applied",
+        scope_json={},
+        archived=True,
+    )
+    other_user = RoutingPlan(
+        id="other-user-archive-plan",
+        user_id="other-user",
+        status="ready",
+        scope_json={},
+    )
+    db.add_all([*plans, archived, other_user])
+    db.commit()
+
+    first = client.get("/api/routing/plans?limit=10&offset=0")
+    second = client.get("/api/routing/plans?limit=10&offset=10")
+    archived_page = client.get("/api/routing/plans?archived=true")
+
+    assert first.status_code == 200
+    assert len(first.json()["items"]) == 10
+    assert first.json()["has_more"] is True
+    assert first.json()["limit"] == 10
+    assert first.json()["offset"] == 0
+    assert second.status_code == 200
+    assert len(second.json()["items"]) == 2
+    assert second.json()["has_more"] is False
+    assert [plan["id"] for plan in archived_page.json()["items"]] == [archived.id]
+
+    archive_response = client.patch(
+        f"/api/routing/plans/{plans[0].id}/archive",
+        json={"archived": True},
+    )
+    forbidden = client.patch(
+        f"/api/routing/plans/{other_user.id}/archive",
+        json={"archived": True},
+    )
+
+    assert archive_response.status_code == 200
+    assert archive_response.json()["archived"] is True
+    assert forbidden.status_code == 404
+    db.refresh(plans[0])
+    assert plans[0].archived is True
+
+    restore_response = client.patch(
+        f"/api/routing/plans/{plans[0].id}/archive",
+        json={"archived": False},
+    )
+
+    assert restore_response.status_code == 200
+    assert restore_response.json()["archived"] is False
 
 
 def test_review_only_items_do_not_count_as_routing_history(db):

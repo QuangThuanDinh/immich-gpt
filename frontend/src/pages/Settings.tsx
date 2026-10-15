@@ -19,6 +19,7 @@ import { formatApiError } from "../utils/apiError";
 import { CheckCircle, AlertTriangle, Plus, Trash2, Pencil, Heart, Github, Scale, RefreshCw } from "lucide-react";
 import MobileSidebarToggle from "../components/MobileSidebarToggle";
 import responsive from "../styles/MasterDetail.module.css";
+import styles from "./Settings.module.css";
 
 const inputStyle: React.CSSProperties = {
   background: "#1e293b",
@@ -449,6 +450,9 @@ function ProvidersSection() {
   const [form, setForm] = useState<ProviderForm>(EMPTY_FORM);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [currentTestResult, setCurrentTestResult] = useState<TestResult | null>(null);
+  const [focusedProviderId, setFocusedProviderId] = useState<string | null>(null);
+  const providerRowRefs = React.useRef(new Map<string, HTMLDivElement>());
+  const providerActionRefs = React.useRef(new Map<string, Array<HTMLButtonElement | null>>());
 
   function openAdd() {
     setEditingName(null);
@@ -525,11 +529,102 @@ function ProvidersSection() {
     form.provider_name === "openai" &&
     currentAzureFieldsStarted &&
     !(form.base_url && form.azure_deployment);
+  const activeProviderId = providers.some((provider) => provider.id === focusedProviderId)
+    ? focusedProviderId
+    : providers[0]?.id;
+
+  function focusProvider(provider: ProviderConfig) {
+    setFocusedProviderId(provider.id);
+    providerRowRefs.current.get(provider.id)?.focus();
+  }
+
+  function handleProviderKeyDown(
+    event: React.KeyboardEvent<HTMLDivElement>,
+    providerIndex: number,
+  ) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown") nextIndex = (providerIndex + 1) % providers.length;
+    if (event.key === "ArrowUp") nextIndex = (providerIndex - 1 + providers.length) % providers.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = providers.length - 1;
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusProvider(providers[nextIndex]);
+      return;
+    }
+
+    const actionRefs = (providerActionRefs.current.get(providers[providerIndex].id) ?? [])
+      .filter((button): button is HTMLButtonElement => Boolean(button && !button.disabled));
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      actionRefs[0]?.focus();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      actionRefs[actionRefs.length - 1]?.focus();
+    }
+  }
+
+  function handleProviderActionKeyDown(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    providerIndex: number,
+  ) {
+    const provider = providers[providerIndex];
+    const actionRefs = (providerActionRefs.current.get(provider.id) ?? [])
+      .filter((button): button is HTMLButtonElement => Boolean(button && !button.disabled));
+    const actionIndex = actionRefs.indexOf(event.currentTarget);
+
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      focusProvider(provider);
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (actionIndex === 0) {
+        focusProvider(provider);
+      } else {
+        actionRefs[actionIndex - 1]?.focus();
+      }
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (actionIndex === actionRefs.length - 1) {
+        if (providerIndex < providers.length - 1) focusProvider(providers[providerIndex + 1]);
+      } else {
+        actionRefs[actionIndex + 1]?.focus();
+      }
+    }
+  }
 
   return (
     <Section title="AI Providers">
-      {providers.map((p: ProviderConfig) => (
-        <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: "1px solid #334155" }}>
+      <div role="list" aria-label="AI providers">
+      {providers.map((p: ProviderConfig, providerIndex: number) => (
+        <div
+          key={p.id}
+          ref={(element) => {
+            if (element) {
+              providerRowRefs.current.set(p.id, element);
+            } else {
+              providerRowRefs.current.delete(p.id);
+            }
+          }}
+          role="listitem"
+          aria-label={`AI provider ${p.provider_name}`}
+          tabIndex={p.id === activeProviderId ? 0 : -1}
+          className={styles.providerRow}
+          onFocus={(event) => {
+            if (event.currentTarget === event.target) setFocusedProviderId(p.id);
+          }}
+          onKeyDown={(event) => {
+            if (event.currentTarget === event.target) handleProviderKeyDown(event, providerIndex);
+          }}
+          style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: "1px solid #334155" }}
+        >
           <div style={{
             width: 40, height: 40, borderRadius: 8, background: "#0f172a",
             display: "flex", alignItems: "center", justifyContent: "center",
@@ -582,7 +677,16 @@ function ProvidersSection() {
           <div style={{ display: "flex", gap: 6 }}>
             {editingName === p.provider_name ? (
               <button
+                ref={(element) => {
+                  const refs = providerActionRefs.current.get(p.id) ?? [];
+                  refs[0] = element;
+                  providerActionRefs.current.set(p.id, refs);
+                }}
+                type="button"
+                tabIndex={-1}
+                className={styles.providerAction}
                 onClick={() => currentTestMut.mutate(form)}
+                onKeyDown={(event) => handleProviderActionKeyDown(event, providerIndex)}
                 disabled={currentTestMut.isPending || currentAzureConfigIncomplete}
                 style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #334155", background: "transparent", color: "#38bdf8", fontSize: 12, cursor: "pointer" }}
               >
@@ -590,23 +694,53 @@ function ProvidersSection() {
               </button>
             ) : (
               <button
+                ref={(element) => {
+                  const refs = providerActionRefs.current.get(p.id) ?? [];
+                  refs[0] = element;
+                  providerActionRefs.current.set(p.id, refs);
+                }}
+                type="button"
+                tabIndex={-1}
+                className={styles.providerAction}
                 onClick={() => testMut.mutate(p.provider_name)}
+                onKeyDown={(event) => handleProviderActionKeyDown(event, providerIndex)}
                 style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #334155", background: "transparent", color: "#64748b", fontSize: 12, cursor: "pointer" }}
               >
                 Test
               </button>
             )}
             <button
+              ref={(element) => {
+                const refs = providerActionRefs.current.get(p.id) ?? [];
+                refs[1] = element;
+                providerActionRefs.current.set(p.id, refs);
+              }}
+              type="button"
+              tabIndex={-1}
+              className={styles.providerAction}
               onClick={() => openEdit(p)}
+              onKeyDown={(event) => handleProviderActionKeyDown(event, providerIndex)}
               title="Edit provider"
+              aria-label="Edit provider"
               style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #334155", background: "transparent", color: "#38bdf8", cursor: "pointer" }}
             >
               <Pencil size={13} />
             </button>
             <button
+              ref={(element) => {
+                const refs = providerActionRefs.current.get(p.id) ?? [];
+                refs[2] = element;
+                providerActionRefs.current.set(p.id, refs);
+              }}
+              type="button"
+              tabIndex={-1}
+              className={styles.providerAction}
               onClick={() => {
                 if (confirm(`Remove ${p.provider_name}?`)) deleteMut.mutate(p.provider_name);
               }}
+              onKeyDown={(event) => handleProviderActionKeyDown(event, providerIndex)}
+              title="Delete provider"
+              aria-label="Delete provider"
               style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #334155", background: "transparent", color: "#ef4444", cursor: "pointer" }}
             >
               <Trash2 size={13} />
@@ -614,6 +748,7 @@ function ProvidersSection() {
           </div>
         </div>
       ))}
+      </div>
 
       {providers.length === 0 && !showAdd && (
         <div style={{ fontSize: 14, color: "#64748b", textAlign: "center", padding: 16 }}>

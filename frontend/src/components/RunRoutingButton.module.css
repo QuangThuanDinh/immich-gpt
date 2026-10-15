@@ -12,6 +12,17 @@
   width: 260px;
 }
 
+.menuItem {
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #f1f5f9 !important;
+  outline: none;
+}
+
 @media (max-width: 900px) {
   .menu {
     right: auto;

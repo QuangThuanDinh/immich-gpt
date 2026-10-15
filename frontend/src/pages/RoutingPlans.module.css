@@ -1,0 +1,36 @@
+.planCard:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.archiveButton {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.archiveButton:hover,
+.archiveButton:focus-visible {
+  border-color: #475569;
+}
+
+.archiveButton:focus-visible {
+  border-width: 2px;
+  border-color: #3b82f6;
+  outline: none;
+}
+
+.archiveButton:disabled {
+  cursor: wait;
+}

@@ -226,10 +226,22 @@ class RoutingPlanOut(BaseModel):
     scope: Optional[Dict[str, Any]] = None
     summary: Optional[Dict[str, Any]] = None
     item_count: int = 0
+    archived: bool = False
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RoutingPlanPage(BaseModel):
+    items: List[RoutingPlanOut]
+    has_more: bool
+    limit: int
+    offset: int
+
+
+class RoutingPlanArchiveRequest(BaseModel):
+    archived: bool
 
 
 class RoutingClassifyRequest(BaseModel):

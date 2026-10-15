@@ -30,6 +30,9 @@ export default function AdminUsers() {
   const [createForm, setCreateForm] = useState({ email: "", username: "", password: "", role: "user", force_password_change: true });
   const [createError, setCreateError] = useState("");
   const [resetResult, setResetResult] = useState<{ userId: string; copied: boolean } | null>(null);
+  const [focusedUserId, setFocusedUserId] = useState<string | null>(null);
+  const userRowRefs = React.useRef(new Map<string, HTMLTableRowElement>());
+  const userActionRefs = React.useRef(new Map<string, Array<HTMLButtonElement | null>>());
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["admin-users"],
@@ -67,6 +70,75 @@ export default function AdminUsers() {
     mutationFn: adminDeleteUser,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
   });
+  const adminUsers = users as AdminUser[];
+  const activeUserId = adminUsers.some((user) => user.id === focusedUserId)
+    ? focusedUserId
+    : adminUsers[0]?.id;
+
+  function focusUser(user: AdminUser) {
+    setFocusedUserId(user.id);
+    userRowRefs.current.get(user.id)?.focus();
+  }
+
+  function handleUserKeyDown(
+    event: React.KeyboardEvent<HTMLTableRowElement>,
+    userIndex: number,
+  ) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown") nextIndex = (userIndex + 1) % adminUsers.length;
+    if (event.key === "ArrowUp") nextIndex = (userIndex - 1 + adminUsers.length) % adminUsers.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = adminUsers.length - 1;
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusUser(adminUsers[nextIndex]);
+      return;
+    }
+
+    const actionRefs = userActionRefs.current.get(adminUsers[userIndex].id) ?? [];
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      actionRefs[0]?.focus();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      actionRefs[actionRefs.length - 1]?.focus();
+    }
+  }
+
+  function handleActionKeyDown(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    userIndex: number,
+    actionIndex: number,
+  ) {
+    const user = adminUsers[userIndex];
+    const actionRefs = userActionRefs.current.get(user.id) ?? [];
+
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      focusUser(user);
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (actionIndex === 0) {
+        focusUser(user);
+      } else {
+        actionRefs[actionIndex - 1]?.focus();
+      }
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (actionIndex === actionRefs.length - 1) {
+        if (userIndex < adminUsers.length - 1) focusUser(adminUsers[userIndex + 1]);
+      } else {
+        actionRefs[actionIndex + 1]?.focus();
+      }
+    }
+  }
 
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1400 }}>
@@ -250,11 +322,30 @@ export default function AdminUsers() {
               </tr>
             </thead>
             <tbody>
-              {(users as AdminUser[]).map((u, idx) => (
-                <tr key={u.id} className={styles.row} style={{
+              {adminUsers.map((u, idx) => (
+                <tr
+                  key={u.id}
+                  ref={(element) => {
+                    if (element) {
+                      userRowRefs.current.set(u.id, element);
+                    } else {
+                      userRowRefs.current.delete(u.id);
+                    }
+                  }}
+                  className={styles.row}
+                  aria-label={`User ${u.username}`}
+                  tabIndex={u.id === activeUserId ? 0 : -1}
+                  onFocus={(event) => {
+                    if (event.currentTarget === event.target) setFocusedUserId(u.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.currentTarget === event.target) handleUserKeyDown(event, idx);
+                  }}
+                  style={{
                   borderBottom: idx < users.length - 1 ? "1px solid #1e293b" : "none",
                   background: idx % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)",
-                }}>
+                  }}
+                >
                   <td className={styles.userCell} style={{ padding: "12px 16px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <User size={14} color="#64748b" />
@@ -307,18 +398,36 @@ export default function AdminUsers() {
                         icon={u.is_active ? <UserX size={13} /> : <ShieldCheck size={13} />}
                         onClick={() => updateMutation.mutate({ id: u.id, is_active: !u.is_active })}
                         color={u.is_active ? "#f87171" : "#4ade80"}
+                        buttonRef={(element) => {
+                          const refs = userActionRefs.current.get(u.id) ?? [];
+                          refs[0] = element;
+                          userActionRefs.current.set(u.id, refs);
+                        }}
+                        onKeyDown={(event) => handleActionKeyDown(event, idx, 0)}
                       />
                       <ActionBtn
                         title="Reset password"
                         icon={<Key size={13} />}
                         onClick={() => resetMutation.mutate(u.id)}
                         color="#f59e0b"
+                        buttonRef={(element) => {
+                          const refs = userActionRefs.current.get(u.id) ?? [];
+                          refs[1] = element;
+                          userActionRefs.current.set(u.id, refs);
+                        }}
+                        onKeyDown={(event) => handleActionKeyDown(event, idx, 1)}
                       />
                       <ActionBtn
                         title="Require password change"
                         icon={<RefreshCw size={13} />}
                         onClick={() => updateMutation.mutate({ id: u.id, force_password_change: true })}
                         color="#94a3b8"
+                        buttonRef={(element) => {
+                          const refs = userActionRefs.current.get(u.id) ?? [];
+                          refs[2] = element;
+                          userActionRefs.current.set(u.id, refs);
+                        }}
+                        onKeyDown={(event) => handleActionKeyDown(event, idx, 2)}
                       />
                       <ActionBtn
                         title="Delete user"
@@ -329,6 +438,12 @@ export default function AdminUsers() {
                           }
                         }}
                         color="#ef4444"
+                        buttonRef={(element) => {
+                          const refs = userActionRefs.current.get(u.id) ?? [];
+                          refs[3] = element;
+                          userActionRefs.current.set(u.id, refs);
+                        }}
+                        onKeyDown={(event) => handleActionKeyDown(event, idx, 3)}
                       />
                     </div>
                   </td>
@@ -349,16 +464,24 @@ export default function AdminUsers() {
   );
 }
 
-function ActionBtn({ title, icon, onClick, color }: {
+function ActionBtn({ title, icon, onClick, color, buttonRef, onKeyDown }: {
   title: string;
   icon: React.ReactNode;
   onClick: () => void;
   color: string;
+  buttonRef: (element: HTMLButtonElement | null) => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button
+      ref={buttonRef}
+      type="button"
+      tabIndex={-1}
+      className={styles.actionButton}
       title={title}
+      aria-label={title}
       onClick={onClick}
+      onKeyDown={onKeyDown}
       style={{
         display: "flex",
         alignItems: "center",

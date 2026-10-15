@@ -16,6 +16,7 @@ class RoutingPlan(Base):
 
     scope_json = Column(JSON, nullable=True)
     summary_json = Column(JSON, nullable=True)
+    archived = Column(Boolean, nullable=False, default=False, index=True)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, waitForElementToBeRemoved } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, waitForElementToBeRemoved, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -141,6 +141,41 @@ describe("App routing", () => {
       "href",
       expect.stringContaining("paypal.com"),
     ));
+  });
+
+  it("uses one tab stop and arrow keys within the sidebar navigation", async () => {
+    render(
+      <Wrapper>
+        <App />
+      </Wrapper>
+    );
+
+    const navigation = await screen.findByRole("navigation");
+    const sidebarItems = within(navigation).getByLabelText("Primary navigation items");
+    const dashboard = within(sidebarItems).getByRole("link", { name: "Dashboard" });
+    const assets = within(sidebarItems).getByRole("link", { name: "Assets" });
+    const routing = within(sidebarItems).getByRole("link", { name: "Routing" });
+    const settings = within(sidebarItems).getByRole("link", { name: "Settings" });
+
+    expect(dashboard).toHaveAttribute("tabindex", "0");
+    expect(assets).toHaveAttribute("tabindex", "-1");
+
+    act(() => dashboard.focus());
+    fireEvent.keyDown(dashboard, { key: "ArrowDown" });
+    expect(assets).toHaveFocus();
+    expect(assets).toHaveAttribute("tabindex", "0");
+    expect(dashboard).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.keyDown(assets, { key: "ArrowDown" });
+    expect(routing).toHaveFocus();
+    fireEvent.keyDown(routing, { key: "ArrowUp" });
+    expect(assets).toHaveFocus();
+
+    act(() => dashboard.focus());
+    fireEvent.keyDown(dashboard, { key: "ArrowUp" });
+    expect(settings).toHaveFocus();
+    fireEvent.keyDown(settings, { key: "ArrowDown" });
+    expect(dashboard).toHaveFocus();
   });
 
   it("opens and closes the sidebar from the page heading", async () => {

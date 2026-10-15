@@ -22,17 +22,26 @@ import {
 } from "lucide-react";
 import styles from "./Dashboard.module.css";
 
-function StatCard({ label, value, color = "var(--text-primary)", icon }: {
-  label: string; value: string | number; color?: string; icon?: React.ReactNode;
+function StatCard({ label, value, color = "var(--text-primary)", icon, to, warning = false }: {
+  label: string;
+  value: string | number;
+  color?: string;
+  icon?: React.ReactNode;
+  to: string;
+  warning?: boolean;
 }) {
   return (
-    <div className={styles.statCard}>
+    <Link
+      to={to}
+      className={[styles.statCard, warning ? styles.statCardWarning : ""].join(" ")}
+      onMouseDown={(event) => event.preventDefault()}
+    >
       <div className={styles.statCardHeader}>
         {icon}
         <span className={styles.statLabel}>{label}</span>
       </div>
       <div className={styles.statValue} style={{ color }}>{value}</div>
-    </div>
+    </Link>
   );
 }
 
@@ -260,6 +269,12 @@ export default function Dashboard() {
       return pageVisible && hasActiveJob ? 3_000 : false;
     },
   });
+  const activeJob = jobs.find((j) => !TERMINAL_STATUSES.has(j.status) && j.status !== "paused");
+  const activeRoutingJob = jobs.find(
+    (j) => j.job_type === "routing_classification"
+      && !TERMINAL_STATUSES.has(j.status)
+      && j.status !== "paused",
+  );
 
   const { data: nodes = [] } = useQuery<RoutingNode[]>({
     queryKey: ["routing-nodes-flat"],
@@ -270,12 +285,20 @@ export default function Dashboard() {
   const { data: plans = [] } = useQuery<RoutingPlan[]>({
     queryKey: ["routing-plans"],
     queryFn: () => listRoutingPlans(),
-    refetchInterval: pageVisible ? 60_000 : false,
+    refetchInterval: pageVisible ? (activeRoutingJob ? 3_000 : 60_000) : false,
   });
 
   const enabledLeaves = nodes.filter((n) => n.is_leaf && n.enabled);
-  const pendingPlans = plans.filter((p) => p.status === "ready" || p.status === "draft");
-  const pendingItems = pendingPlans.reduce((s, p) => s + p.item_count, 0);
+  const pendingPlans = plans.filter(
+    (p) => p.status === "ready" || p.status === "draft" || p.status === "partially_applied",
+  );
+  const reviewablePlans = pendingPlans.filter((plan) => plan.item_count > 0);
+  const reviewPlan = (
+    activeRoutingJob
+      ? reviewablePlans.find((plan) => plan.job_id === activeRoutingJob.id)
+      : undefined
+  ) ?? reviewablePlans[0];
+  const pendingPlanItems = reviewPlan?.item_count ?? 0;
 
   const routeMutation = useMutation({
     mutationFn: (force: boolean) => startRoutingClassify({ force }),
@@ -313,7 +336,6 @@ export default function Dashboard() {
     },
   });
 
-  const activeJob = jobs.find((j) => !TERMINAL_STATUSES.has(j.status) && j.status !== "paused");
   const terminalJobs = jobs.filter((j) => TERMINAL_STATUSES.has(j.status));
 
   return (
@@ -349,17 +371,23 @@ export default function Dashboard() {
           label="Synced Assets"
           value={assetCount?.count?.toLocaleString() ?? "—"}
           icon={<Database size={16} color="var(--accent)" />}
+          to="/assets"
         />
         <StatCard
           label="Routing Leaves"
           value={enabledLeaves.length}
           icon={<Network size={16} color="#a78bfa" />}
+          to="/routing"
         />
         <StatCard
           label="Pending Plan Items"
-          value={pendingItems}
-          color={pendingItems ? "var(--color-warning)" : "var(--text-primary)"}
+          value={pendingPlanItems}
+          color={pendingPlanItems ? "var(--color-warning)" : "var(--text-primary)"}
           icon={<GitBranch size={16} color="var(--color-warning)" />}
+          warning={pendingPlanItems > 0}
+          to={reviewPlan
+            ? `/routing/plans?plan=${encodeURIComponent(reviewPlan.id)}`
+            : "/routing/plans"}
         />
       </div>
 
@@ -376,18 +404,6 @@ export default function Dashboard() {
         isLoading={syncMutation.isPending || routeMutation.isPending}
         disabled={!!activeJob}
       />
-
-      {pendingItems > 0 && (
-        <div className={styles.actionsRow}>
-          <Link to="/routing/plans" style={{
-            display: "flex", alignItems: "center", gap: 8,
-            padding: "10px 20px", borderRadius: "var(--radius-md)",
-            background: "#d97706", color: "white", fontSize: "var(--text-md)", fontWeight: 600, textDecoration: "none",
-          }}>
-            <GitBranch size={15} /> Review {pendingItems} pending item{pendingItems !== 1 ? "s" : ""}
-          </Link>
-        </div>
-      )}
 
       {activeJob && (
         <div className={styles.section}>

@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import dashboardStyles from "../pages/Dashboard.module.css";
 
 const mocks = vi.hoisted(() => ({
   getImmichSettings: vi.fn(),
@@ -59,6 +60,30 @@ beforeEach(() => {
 });
 
 describe("Dashboard workflow", () => {
+  it("links dashboard stat cards to their related pages", async () => {
+    mocks.getAssetCount.mockResolvedValue({ count: 12 });
+    mocks.listRoutingNodes.mockResolvedValue([
+      { id: "leaf", name: "Leaf", enabled: true, is_leaf: true },
+    ]);
+    mocks.listRoutingPlans.mockResolvedValue([{
+      id: "review-plan",
+      job_id: "finished-route",
+      status: "ready",
+      item_count: 3,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }]);
+
+    renderDashboard();
+
+    expect(await screen.findByRole("link", { name: /Synced Assets 12/i }))
+      .toHaveAttribute("href", "/assets");
+    expect(screen.getByRole("link", { name: /Routing Leaves 1/i }))
+      .toHaveAttribute("href", "/routing");
+    expect(screen.getByRole("link", { name: /Pending Plan Items 3/i }))
+      .toHaveAttribute("href", "/routing/plans?plan=review-plan");
+  });
+
   it("sends sync+route to backend without starting routing immediately", async () => {
     renderDashboard();
 
@@ -141,5 +166,61 @@ describe("Dashboard workflow", () => {
     await waitFor(() => {
       expect(mocks.startRoutingClassify).toHaveBeenCalledWith({ force: true });
     });
+  });
+
+  it("links an in-progress routing plan directly to review", async () => {
+    mocks.getJobs.mockResolvedValue([{
+      id: "route-job",
+      job_type: "routing_classification",
+      status: "classifying_ai",
+      progress_percent: 25,
+      processed_count: 1,
+      total_count: 4,
+      success_count: 1,
+      error_count: 0,
+      created_at: new Date().toISOString(),
+    }]);
+    mocks.listRoutingPlans.mockResolvedValue([{
+      id: "plan/one",
+      job_id: "route-job",
+      status: "draft",
+      item_count: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }]);
+
+    renderDashboard();
+
+    const reviewLink = await screen.findByRole("link", { name: /Pending Plan Items 1/i });
+    expect(reviewLink).toHaveAttribute("href", "/routing/plans?plan=plan%2Fone");
+    expect(reviewLink).toHaveClass(dashboardStyles.statCardWarning);
+    expect(screen.queryByRole("link", { name: /Review 1 pending item/i })).not.toBeInTheDocument();
+  });
+
+  it("shows mixed plans that still contain items awaiting approval", async () => {
+    mocks.listRoutingPlans.mockResolvedValue([
+      {
+        id: "mixed-plan",
+        job_id: "finished-route",
+        status: "partially_applied",
+        item_count: 3,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        id: "older-plan",
+        job_id: "older-route",
+        status: "ready",
+        item_count: 4,
+        created_at: new Date(Date.now() - 60_000).toISOString(),
+        updated_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+    ]);
+
+    renderDashboard();
+
+    expect(await screen.findByRole("link", { name: /Pending Plan Items 3/i }))
+      .toHaveAttribute("href", "/routing/plans?plan=mixed-plan");
+    expect(screen.queryByRole("link", { name: /Review \d+ pending items/i })).not.toBeInTheDocument();
   });
 });

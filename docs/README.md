@@ -9,6 +9,7 @@ This directory holds the detailed guides that sit behind the main project README
 - Reverse proxy or HTTPS setup: [`reverse-proxy.md`](reverse-proxy.md)
 - Environment variables and runtime behavior: [`configuration.md`](configuration.md)
 - Curious about internals: [`architecture.md`](architecture.md)
+- Implementing keyboard navigation: [`keyboard-navigation.md`](keyboard-navigation.md)
 - Contributor or local developer: [`development.md`](development.md)
 - Need help diagnosing a problem: [`troubleshooting.md`](troubleshooting.md)
 
@@ -44,6 +45,7 @@ Read these sections in order:
 | `getting-started.md` | Install, first login, first workflow |
 | `configuration.md` | Full configuration reference and precedence rules |
 | `architecture.md` | System design, jobs, storage, write-back flow |
+| `keyboard-navigation.md` | Keyboard rules for list items and their child controls |
 | `development.md` | Local run commands, tests, builds, migrations |
 | `troubleshooting.md` | Common deployment and runtime problems |
 | `reverse-proxy.md` | Proxy, HTTPS, SSE, and forwarded header guidance |

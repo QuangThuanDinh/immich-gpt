@@ -10,6 +10,7 @@ import type {
   RoutingNode,
   RoutingExample,
   RoutingPlan,
+  RoutingPlanPage,
   RoutingPlanItem,
   RoutingPlanItemUpdate,
   RoutingPlanSummary,
@@ -313,14 +314,33 @@ export const runRoutingEvaluationItem = (
 ): Promise<RoutingEvaluation> =>
   api.post(`/routing/evaluation/items/${itemId}/run`).then((r) => r.data);
 
-export const listRoutingPlans = (params?: { status?: string }): Promise<RoutingPlan[]> =>
+export const listRoutingPlansPage = (params?: {
+  status?: string;
+  archived?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<RoutingPlanPage> =>
   api.get("/routing/plans", { params }).then((r) => r.data);
+
+export const listRoutingPlans = (params?: {
+  status?: string;
+  archived?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<RoutingPlan[]> =>
+  listRoutingPlansPage(params).then((page) => page.items);
 
 export const getRoutingPlan = (planId: string): Promise<RoutingPlan> =>
   api.get(`/routing/plans/${planId}`).then((r) => r.data);
 
 export const deleteRoutingPlan = (planId: string): Promise<{ deleted: boolean }> =>
   api.delete(`/routing/plans/${planId}`).then((r) => r.data);
+
+export const archiveRoutingPlan = (
+  planId: string,
+  archived: boolean,
+): Promise<RoutingPlan> =>
+  api.patch(`/routing/plans/${planId}/archive`, { archived }).then((r) => r.data);
 
 export const getRoutingPlanSummary = (planId: string): Promise<RoutingPlanSummary> =>
   api.get(`/routing/plans/${planId}/summary`).then((r) => r.data);

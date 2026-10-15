@@ -1,0 +1,13 @@
+.providerRow:focus {
+  outline: none;
+}
+
+.providerRow:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.providerAction:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
