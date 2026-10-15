@@ -864,6 +864,30 @@ def test_review_only_classification_does_not_auto_apply(db):
     orchestrator._apply_auto_apply_items.assert_not_called()
 
 
+def test_recurring_auto_approval_applies_all_pending_items(db):
+    orchestrator = _make_orchestrator(db)
+    pending = SimpleNamespace(status="pending", auto_apply=False, error_message=None)
+    approved = SimpleNamespace(status="approved", auto_apply=False, error_message=None)
+    failed = SimpleNamespace(status="failed", auto_apply=False, error_message="AI failed")
+    orchestrator.plan_service.list_items = MagicMock(
+        return_value=[pending, approved, failed],
+    )
+    orchestrator.plan_service.mark_plan_applied = MagicMock()
+    orchestrator.writeback_service.apply_item = MagicMock(
+        return_value=SimpleNamespace(errors=[]),
+    )
+
+    orchestrator._apply_auto_apply_items("recurring-plan", approve_all=True)
+
+    assert pending.status == "applied"
+    assert approved.status == "applied"
+    assert failed.status == "failed"
+    assert orchestrator.writeback_service.apply_item.call_count == 2
+    orchestrator.plan_service.mark_plan_applied.assert_called_once_with(
+        "recurring-plan",
+    )
+
+
 def test_parallel_classification_respects_configured_concurrency(db):
     orchestrator = RoutingClassificationOrchestrator(
         db,

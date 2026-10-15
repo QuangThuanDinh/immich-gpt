@@ -83,6 +83,17 @@ export interface ImmichSettings {
 export type SyncScope = "all" | "favorites" | "albums";
 export type SyncMode = "quick" | "normal" | "full";
 
+export interface WorkflowSchedule {
+  id: string;
+  daily_time: string;
+  timezone: string;
+  enabled: boolean;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SyncJobRequest {
   scope: SyncScope;
   album_ids?: string[];

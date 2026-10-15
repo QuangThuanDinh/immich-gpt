@@ -331,6 +331,14 @@ export default function RoutingPlans() {
               <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
                 {p.status} · {p.item_count} item{p.item_count === 1 ? "" : "s"}
               </div>
+              {p.scope?.recurring === true && (
+                <div className={styles.planBadges}>
+                  <span className={styles.planBadge}>Recurring</span>
+                  {p.scope?.auto_approve === true && (
+                    <span className={styles.planBadge}>Auto-approved</span>
+                  )}
+                </div>
+              )}
               <button
                 ref={(element) => { archiveButtonRefs.current[p.id] = element; }}
                 type="button"

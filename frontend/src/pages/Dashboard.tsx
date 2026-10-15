@@ -5,9 +5,12 @@ import {
   getImmichSettings, getAssetCount, getJobs,
   getAlbums, startSyncJob, startRoutingClassify, clearTerminalJobs,
   listRoutingPlans, listRoutingNodes,
+  listWorkflowSchedules, createWorkflowSchedule, updateWorkflowSchedule,
+  deleteWorkflowSchedule,
 } from "../services/api";
 import type {
   SyncMode, SyncScope, ImmichAlbum, RoutingNode, RoutingPlan, JobRun,
+  WorkflowSchedule,
 } from "../types";
 import JobProgressBar from "../components/JobProgressBar";
 import JobDetail from "../components/JobDetail";
@@ -18,7 +21,7 @@ import { usePageVisible } from "../hooks/usePageVisible";
 import {
   Database, Play, RefreshCw, AlertTriangle, CheckCircle,
   Star, FolderOpen, ChevronDown, ChevronUp, Trash2, Layers,
-  Network, GitBranch,
+  Network, GitBranch, CalendarClock, Pause,
 } from "lucide-react";
 import styles from "./Dashboard.module.css";
 
@@ -51,7 +54,11 @@ const SCOPE_OPTIONS: { value: SyncScope; label: string; desc: string; icon: Reac
   { value: "albums",    label: "Specific Albums",      desc: "Choose one or more albums",                icon: <FolderOpen size={14} /> },
 ];
 
-type WorkflowMode = "sync" | "sync_route" | "route";
+type WorkflowMode = "sync" | "sync_route" | "route" | "recurring";
+const recurringHours = Array.from(
+  { length: 24 },
+  (_, hour) => `${String(hour).padStart(2, "0")}:00`,
+);
 
 function WorkflowPanel({
   onSync, onRoute, isLoading, disabled,
@@ -71,11 +78,37 @@ function WorkflowPanel({
   const [albumsExpanded, setAlbumsExpanded] = useState(false);
   const [albumSearch, setAlbumSearch] = useState("");
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>("sync_route");
+  const [recurringTime, setRecurringTime] = useState("02:00");
+  const [focusedRecurringId, setFocusedRecurringId] = useState<string | null>(null);
+  const recurringItemRefs = React.useRef(new Map<string, HTMLDivElement>());
+  const recurringActionRefs = React.useRef(new Map<string, Array<HTMLButtonElement | null>>());
+  const queryClient = useQueryClient();
 
   const { data: albums = [] } = useQuery<ImmichAlbum[]>({
     queryKey: ["albums"],
     queryFn: getAlbums,
     enabled: scope === "albums",
+  });
+  const { data: recurringTriggers = [] } = useQuery<WorkflowSchedule[]>({
+    queryKey: ["workflow-schedules"],
+    queryFn: listWorkflowSchedules,
+  });
+  const createSchedule = useMutation({
+    mutationFn: () => createWorkflowSchedule({
+      daily_time: recurringTime,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workflow-schedules"] }),
+  });
+  const updateSchedule = useMutation({
+    mutationFn: (schedule: WorkflowSchedule) => (
+      updateWorkflowSchedule(schedule.id, !schedule.enabled)
+    ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workflow-schedules"] }),
+  });
+  const deleteSchedule = useMutation({
+    mutationFn: (scheduleId: string) => deleteWorkflowSchedule(scheduleId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workflow-schedules"] }),
   });
 
   const filtered = albums.filter((a) => a.albumName.toLowerCase().includes(albumSearch.toLowerCase()));
@@ -108,6 +141,12 @@ function WorkflowPanel({
       desc: "Run routing classification on assets already synced. No new assets are pulled from Immich.",
       icon: <Play size={14} />,
     },
+    {
+      value: "recurring",
+      label: "Recurring",
+      desc: "Schedule Quick Sync + Route for new assets and automatically approve the resulting routing plan.",
+      icon: <CalendarClock size={14} />,
+    },
   ];
 
   function handleRun(syncMode: SyncMode = "normal") {
@@ -123,7 +162,93 @@ function WorkflowPanel({
     }
   }
 
-  const showScopeSelector = workflowMode !== "route";
+  const showScopeSelector = workflowMode === "sync" || workflowMode === "sync_route";
+  const recurringTimeExists = recurringTriggers.some(
+    (trigger) => trigger.daily_time === recurringTime,
+  );
+  const activeRecurringId = recurringTriggers.some((trigger) => trigger.id === focusedRecurringId)
+    ? focusedRecurringId
+    : recurringTriggers[0]?.id;
+
+  function addRecurringTrigger() {
+    if (recurringTimeExists) return;
+    createSchedule.mutate();
+  }
+
+  function toggleRecurringTrigger(schedule: WorkflowSchedule) {
+    updateSchedule.mutate(schedule);
+  }
+
+  function removeRecurringTrigger(id: string) {
+    deleteSchedule.mutate(id);
+  }
+
+  function focusRecurringTrigger(trigger: WorkflowSchedule) {
+    setFocusedRecurringId(trigger.id);
+    recurringItemRefs.current.get(trigger.id)?.focus();
+  }
+
+  function handleRecurringKeyDown(
+    event: React.KeyboardEvent<HTMLDivElement>,
+    triggerIndex: number,
+  ) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown") nextIndex = (triggerIndex + 1) % recurringTriggers.length;
+    if (event.key === "ArrowUp") nextIndex = (triggerIndex - 1 + recurringTriggers.length) % recurringTriggers.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = recurringTriggers.length - 1;
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusRecurringTrigger(recurringTriggers[nextIndex]);
+      return;
+    }
+
+    const actionRefs = recurringActionRefs.current.get(recurringTriggers[triggerIndex].id) ?? [];
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      actionRefs[0]?.focus();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      actionRefs[actionRefs.length - 1]?.focus();
+    }
+  }
+
+  function handleRecurringActionKeyDown(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    triggerIndex: number,
+    actionIndex: number,
+  ) {
+    const trigger = recurringTriggers[triggerIndex];
+    const actionRefs = recurringActionRefs.current.get(trigger.id) ?? [];
+
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      focusRecurringTrigger(trigger);
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (actionIndex === 0) {
+        focusRecurringTrigger(trigger);
+      } else {
+        actionRefs[actionIndex - 1]?.focus();
+      }
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (actionIndex === actionRefs.length - 1) {
+        if (triggerIndex < recurringTriggers.length - 1) {
+          focusRecurringTrigger(recurringTriggers[triggerIndex + 1]);
+        }
+      } else {
+        actionRefs[actionIndex + 1]?.focus();
+      }
+    }
+  }
 
   return (
     <div className={styles.syncPanel}>
@@ -214,7 +339,129 @@ function WorkflowPanel({
         </>
       )}
 
-      {workflowMode === "route" ? (
+      {workflowMode === "recurring" ? (
+        <div className={styles.recurringPanel}>
+          <div className={styles.recurringForm}>
+            <label className={styles.recurringField}>
+              <span>Daily run time</span>
+              <select
+                aria-label="Recurring workflow time"
+                value={recurringTime}
+                onChange={(event) => setRecurringTime(event.target.value)}
+                className={styles.recurringTimeInput}
+              >
+                {recurringHours.map((hour) => (
+                  <option key={hour} value={hour}>{hour}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={addRecurringTrigger}
+              disabled={recurringTimeExists || createSchedule.isPending}
+              className={[styles.scopeBtn, recurringTimeExists ? styles.scopeBtnInactive : styles.scopeBtnActive].join(" ")}
+            >
+              <CalendarClock size={14} />
+              {recurringTimeExists ? "Already scheduled" : "Add schedule"}
+            </button>
+          </div>
+
+          <div className={styles.recurringNote}>
+            Each trigger runs Quick Sync across all assets, then routes only newly synced assets.
+            The resulting routing plan is automatically approved. Times use your local timezone.
+          </div>
+          {(createSchedule.isError || updateSchedule.isError || deleteSchedule.isError) && (
+            <div role="alert" className={styles.recurringNote}>
+              The recurring schedule could not be saved. Please try again.
+            </div>
+          )}
+
+          <div
+            role="list"
+            className={styles.recurringList}
+            aria-label="Recurring workflow schedules"
+          >
+            {recurringTriggers.length === 0 ? (
+              <div className={styles.recurringEmpty}>No recurring triggers configured.</div>
+            ) : recurringTriggers.map((trigger) => (
+              <div
+                key={trigger.id}
+                ref={(element) => {
+                  if (element) {
+                    recurringItemRefs.current.set(trigger.id, element);
+                  } else {
+                    recurringItemRefs.current.delete(trigger.id);
+                  }
+                }}
+                role="listitem"
+                aria-label={`Recurring schedule at ${trigger.daily_time}`}
+                tabIndex={trigger.id === activeRecurringId ? 0 : -1}
+                className={styles.recurringItem}
+                onFocus={(event) => {
+                  if (event.currentTarget === event.target) setFocusedRecurringId(trigger.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.currentTarget === event.target) {
+                    handleRecurringKeyDown(event, recurringTriggers.indexOf(trigger));
+                  }
+                }}
+              >
+                <div>
+                  <div className={styles.recurringItemTime}>Daily at {trigger.daily_time}</div>
+                  <div className={styles.recurringItemStatus}>
+                    {trigger.enabled ? "Active" : "Paused"} · Quick Sync + Route
+                  </div>
+                  <div className={styles.recurringBadges}>
+                    <span className={styles.recurringBadge}>Recurring</span>
+                    <span className={styles.recurringBadge}>Auto-approve</span>
+                  </div>
+                </div>
+                <div className={styles.recurringActions}>
+                  <button
+                    ref={(element) => {
+                      const refs = recurringActionRefs.current.get(trigger.id) ?? [];
+                      refs[0] = element;
+                      recurringActionRefs.current.set(trigger.id, refs);
+                    }}
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => toggleRecurringTrigger(trigger)}
+                    onKeyDown={(event) => handleRecurringActionKeyDown(
+                      event,
+                      recurringTriggers.indexOf(trigger),
+                      0,
+                    )}
+                    className={styles.recurringAction}
+                  >
+                    {trigger.enabled ? <Pause size={13} /> : <Play size={13} />}
+                    {trigger.enabled ? "Pause" : "Resume"}
+                  </button>
+                  <button
+                    ref={(element) => {
+                      const refs = recurringActionRefs.current.get(trigger.id) ?? [];
+                      refs[1] = element;
+                      recurringActionRefs.current.set(trigger.id, refs);
+                    }}
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => removeRecurringTrigger(trigger.id)}
+                    onKeyDown={(event) => handleRecurringActionKeyDown(
+                      event,
+                      recurringTriggers.indexOf(trigger),
+                      1,
+                    )}
+                    className={styles.recurringRemove}
+                    aria-label={`Remove daily schedule at ${trigger.daily_time}`}
+                  >
+                    <Trash2 size={13} />
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : workflowMode === "route" ? (
         <RunRoutingButton
           label="Run Routing"
           pending={!canRun}

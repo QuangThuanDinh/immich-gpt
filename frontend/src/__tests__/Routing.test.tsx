@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, fireEvent, within } from "@testing-librar
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import routingPlanStyles from "../pages/RoutingPlans.module.css";
 
 const mocks = vi.hoisted(() => ({
   treeMock: vi.fn(),
@@ -889,6 +890,25 @@ describe("Routing plans page", () => {
 
     expect(await screen.findByRole("img", { name: "Finished plan" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Partially applied plan" })).toBeInTheDocument();
+  });
+
+  it("marks recurring auto-approved plans with green badges", async () => {
+    plansMock.mockResolvedValue([
+      {
+        id: "recurring-plan",
+        job_id: null,
+        status: "applied",
+        item_count: 2,
+        scope: { recurring: true, auto_approve: true },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    render(<Wrapper><RoutingPlans /></Wrapper>);
+
+    expect(await screen.findByText("Recurring")).toHaveClass(routingPlanStyles.planBadge);
+    expect(screen.getByText("Auto-approved")).toHaveClass(routingPlanStyles.planBadge);
   });
 
   it("uses one tab stop and arrow navigation for recent plans and archive actions", async () => {

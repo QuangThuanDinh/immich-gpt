@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 import logging.handlers
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from .limiter import limiter
 from .routers import (
     settings, assets, jobs,
     thumbnails, albums, audit_logs, routing, routing_evaluation,
+    workflow_schedules,
 )
 from .routers.auth import router as auth_router
 from .routers.admin import router as admin_router
@@ -60,7 +62,16 @@ async def lifespan(app: FastAPI):
     init_db()
     _cleanup_expired_tokens()
     _start_background_workers()
-    yield
+    from .services.workflow_scheduler import run_scheduler_loop
+    scheduler_task = asyncio.create_task(run_scheduler_loop())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
 
 
 def _start_background_workers() -> None:
@@ -150,6 +161,7 @@ app.include_router(albums.router)
 app.include_router(audit_logs.router)
 app.include_router(routing.router)
 app.include_router(routing_evaluation.router)
+app.include_router(workflow_schedules.router)
 
 
 @app.get("/api/health")

@@ -145,6 +145,22 @@ When an item opens a side pane:
    Cancel while loading, moves focus to Back when its result appears, and
    restores focus to the AI Query button when closed.
 
+### Recurring workflow schedules
+
+Recurring schedules on the Dashboard follow the linear-list parent/child
+rule. The Daily run time selector offers whole-hour values from 00:00 through
+23:00 in the user's local timezone:
+
+1. Only one schedule row is in the page Tab order.
+2. Up/Down moves between schedules and wraps; Home/End moves to the first or
+   last schedule.
+3. Right enters Pause/Resume and Left enters Remove.
+4. Left/Right moves between Pause/Resume and Remove.
+5. Left on Pause/Resume returns to the schedule row. Right on Remove moves to
+   the next schedule row when one exists.
+6. Up or Down from either action returns to the current schedule row.
+7. Schedule actions use `tabindex="-1"` so Tab exits the schedule list.
+
 ### User Management
 
 The user table follows the linear-list parent/child rule:

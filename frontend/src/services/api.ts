@@ -17,6 +17,7 @@ import type {
   RoutingEvaluation,
   RoutingEvaluationItemInput,
   RoutingTreeSettings,
+  WorkflowSchedule,
 } from "../types";
 
 const api = axios.create({
@@ -74,6 +75,26 @@ export const getSetupStatus = (): Promise<{ setup_required: boolean }> =>
 
 export const setupCreateAdmin = (data: { email: string; username: string; password: string }): Promise<AuthUser> =>
   api.post("/auth/setup", data).then(r => r.data);
+
+// --- Recurring workflows ---
+export const listWorkflowSchedules = (): Promise<WorkflowSchedule[]> =>
+  api.get("/workflow-schedules").then((r) => r.data);
+
+export const createWorkflowSchedule = (
+  data: { daily_time: string; timezone: string },
+): Promise<WorkflowSchedule> =>
+  api.post("/workflow-schedules", data).then((r) => r.data);
+
+export const updateWorkflowSchedule = (
+  scheduleId: string,
+  enabled: boolean,
+): Promise<WorkflowSchedule> =>
+  api.patch(`/workflow-schedules/${scheduleId}`, { enabled }).then((r) => r.data);
+
+export const deleteWorkflowSchedule = (
+  scheduleId: string,
+): Promise<{ deleted: boolean }> =>
+  api.delete(`/workflow-schedules/${scheduleId}`).then((r) => r.data);
 
 // --- Admin ---
 export const adminListUsers = () =>

@@ -126,6 +126,7 @@ def delete_user(db: Session, user_id: str) -> bool:
     from ..models.session import UserSession, PasswordResetToken
     from ..models.routing_example import RoutingExample
     from ..models.routing_plan import RoutingPlan, RoutingPlanItem
+    from ..models.workflow_schedule import WorkflowSchedule
 
     user = get_user_by_id(db, user_id)
     if not user:
@@ -135,6 +136,9 @@ def delete_user(db: Session, user_id: str) -> bool:
     db.query(AuditLog).filter(AuditLog.user_id == user_id).update({"user_id": None})
 
     # Hard-delete all user-owned runtime data
+    db.query(WorkflowSchedule).filter(
+        WorkflowSchedule.user_id == user_id
+    ).delete(synchronize_session=False)
     db.query(RoutingPlanItem).filter(
         RoutingPlanItem.user_id == user_id
     ).delete(synchronize_session=False)

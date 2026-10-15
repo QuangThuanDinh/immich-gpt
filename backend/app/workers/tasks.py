@@ -176,6 +176,9 @@ def run_asset_sync(
     run_routing_after: bool = False,
     full_sync: bool = False,
     quick_sync: bool = False,
+    recurring: bool = False,
+    auto_approve: bool = False,
+    schedule_id: Optional[str] = None,
 ) -> dict:
     db = SessionLocal()
     try:
@@ -304,6 +307,9 @@ def run_asset_sync(
                         user_id=user_id,
                         asset_ids=asset_ids,
                         force=False,
+                        recurring=recurring,
+                        auto_approve=auto_approve,
+                        schedule_id=schedule_id,
                     )
                 else:
                     progress_cb("No newly synced assets require routing")
@@ -328,6 +334,8 @@ def run_routing_classification(
     force: bool = False,
     user_id: Optional[str] = None,
     review_only: bool = False,
+    recurring: bool = False,
+    auto_approve: bool = False,
 ) -> dict:
     """Background task: classify assets against the user's routing tree."""
     db = SessionLocal()
@@ -351,6 +359,8 @@ def run_routing_classification(
                 force=force,
                 plan_id=plan_id,
                 review_only=review_only,
+                recurring=recurring,
+                auto_approve=auto_approve,
             )
         return {"status": "done"}
 

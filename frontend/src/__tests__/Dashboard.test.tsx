@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   clearTerminalJobs: vi.fn(),
   listRoutingPlans: vi.fn(),
   listRoutingNodes: vi.fn(),
+  listWorkflowSchedules: vi.fn(),
+  createWorkflowSchedule: vi.fn(),
+  updateWorkflowSchedule: vi.fn(),
+  deleteWorkflowSchedule: vi.fn(),
 }));
 
 vi.mock("../services/api", () => ({
@@ -27,9 +31,15 @@ vi.mock("../services/api", () => ({
   clearTerminalJobs: mocks.clearTerminalJobs,
   listRoutingPlans: mocks.listRoutingPlans,
   listRoutingNodes: mocks.listRoutingNodes,
+  listWorkflowSchedules: mocks.listWorkflowSchedules,
+  createWorkflowSchedule: mocks.createWorkflowSchedule,
+  updateWorkflowSchedule: mocks.updateWorkflowSchedule,
+  deleteWorkflowSchedule: mocks.deleteWorkflowSchedule,
 }));
 
 import Dashboard from "../pages/Dashboard";
+
+let workflowSchedules: Array<Record<string, unknown>> = [];
 
 function makeClient() {
   return new QueryClient({
@@ -55,6 +65,29 @@ beforeEach(() => {
   mocks.getAlbums.mockResolvedValue([]);
   mocks.listRoutingPlans.mockResolvedValue([]);
   mocks.listRoutingNodes.mockResolvedValue([]);
+  workflowSchedules = [];
+  mocks.listWorkflowSchedules.mockImplementation(async () => workflowSchedules);
+  mocks.createWorkflowSchedule.mockImplementation(async (data) => {
+    const schedule = {
+      id: `schedule-${workflowSchedules.length + 1}`,
+      ...data,
+      enabled: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    workflowSchedules = [...workflowSchedules, schedule];
+    return schedule;
+  });
+  mocks.updateWorkflowSchedule.mockImplementation(async (id, enabled) => {
+    workflowSchedules = workflowSchedules.map((schedule) => (
+      schedule.id === id ? { ...schedule, enabled } : schedule
+    ));
+    return workflowSchedules.find((schedule) => schedule.id === id);
+  });
+  mocks.deleteWorkflowSchedule.mockImplementation(async (id) => {
+    workflowSchedules = workflowSchedules.filter((schedule) => schedule.id !== id);
+    return { deleted: true };
+  });
   mocks.startSyncJob.mockResolvedValue({ job_id: "sync-job", status: "queued" });
   mocks.startRoutingClassify.mockResolvedValue({ job_id: "route-job", plan_id: "plan", status: "queued" });
 });
@@ -166,6 +199,82 @@ describe("Dashboard workflow", () => {
     await waitFor(() => {
       expect(mocks.startRoutingClassify).toHaveBeenCalledWith({ force: true });
     });
+  });
+
+  it("manages recurring Quick Sync + Route schedules in the UI", async () => {
+    renderDashboard();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Recurring" }));
+    expect(screen.getByText("No recurring triggers configured.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Recurring workflow time"), {
+      target: { value: "06:00" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add schedule" }));
+
+    expect(await screen.findByText("Daily at 06:00")).toBeInTheDocument();
+    expect(mocks.createWorkflowSchedule).toHaveBeenCalledWith({
+      daily_time: "06:00",
+      timezone: expect.any(String),
+    });
+    expect(screen.getByText("Active · Quick Sync + Route")).toBeInTheDocument();
+    expect(screen.getAllByText("Recurring").some(
+      (element) => element.classList.contains(dashboardStyles.recurringBadge),
+    )).toBe(true);
+    expect(screen.getByText("Auto-approve")).toHaveClass(dashboardStyles.recurringBadge);
+    expect(screen.getByRole("button", { name: "Already scheduled" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    expect(await screen.findByText("Paused · Quick Sync + Route")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(await screen.findByText("Active · Quick Sync + Route")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Remove daily schedule at 06:00",
+    }));
+    expect(await screen.findByText("No recurring triggers configured.")).toBeInTheDocument();
+  });
+
+  it("uses one Tab stop with parent and child navigation for recurring schedules", async () => {
+    renderDashboard();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Recurring" }));
+    const timeInput = screen.getByLabelText("Recurring workflow time");
+    fireEvent.change(timeInput, { target: { value: "06:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add schedule" }));
+    await screen.findByRole("listitem", {
+      name: "Recurring schedule at 06:00",
+    });
+    fireEvent.change(timeInput, { target: { value: "07:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add schedule" }));
+
+    const first = await screen.findByRole("listitem", {
+      name: "Recurring schedule at 06:00",
+    });
+    const second = screen.getByRole("listitem", {
+      name: "Recurring schedule at 07:00",
+    });
+    const firstPause = within(first).getByRole("button", { name: "Pause" });
+    const firstRemove = within(first).getByRole("button", { name: /Remove daily schedule/i });
+
+    expect(first).toHaveAttribute("tabindex", "0");
+    expect(second).toHaveAttribute("tabindex", "-1");
+    expect(firstPause).toHaveAttribute("tabindex", "-1");
+    expect(firstRemove).toHaveAttribute("tabindex", "-1");
+
+    act(() => first.focus());
+    fireEvent.keyDown(first, { key: "ArrowUp" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "ArrowDown" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(firstPause).toHaveFocus();
+    fireEvent.keyDown(firstPause, { key: "ArrowRight" });
+    expect(firstRemove).toHaveFocus();
+    fireEvent.keyDown(firstRemove, { key: "ArrowRight" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "ArrowLeft" });
+    expect(within(second).getByRole("button", { name: /Remove daily schedule/i })).toHaveFocus();
   });
 
   it("links an in-progress routing plan directly to review", async () => {

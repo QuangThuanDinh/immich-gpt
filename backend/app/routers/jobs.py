@@ -173,34 +173,19 @@ def start_sync_job(
     db: Session = Depends(get_db),
     current_user=Depends(require_active_user),
 ):
-    from ..workers.tasks import run_asset_sync
+    from ..workers.executor import enqueue_asset_sync
     req = body or SyncJobRequest()
-
-    svc = JobProgressService(db)
-    job = svc.create_job(
-        "asset_sync",
-        params={
-            "scope": req.scope,
-            "album_ids": req.album_ids,
-            "run_routing_after": req.run_routing_after,
-            "quick_sync": req.quick_sync,
-            "full_sync": req.full_sync,
-        },
+    job_id = enqueue_asset_sync(
+        db,
         user_id=current_user.id,
+        scope=req.scope,
+        album_ids=req.album_ids,
+        run_routing_after=req.run_routing_after,
+        full_sync=req.full_sync,
+        quick_sync=req.quick_sync,
     )
 
-    _enqueue(
-        run_asset_sync,
-        job.id,
-        req.scope,
-        req.album_ids,
-        current_user.id,
-        req.run_routing_after,
-        req.full_sync,
-        req.quick_sync,
-    )
-
-    return JobStartResponse(job_id=job.id, status="queued", message="Sync job started")
+    return JobStartResponse(job_id=job_id, status="queued", message="Sync job started")
 
 
 @router.post("/{job_id}/cancel")
@@ -291,6 +276,9 @@ def _resume_job_task(job_id: str) -> None:
                 params.get("run_routing_after", False),
                 params.get("full_sync", False),
                 params.get("quick_sync", False),
+                params.get("recurring", False),
+                params.get("auto_approve", False),
+                params.get("schedule_id"),
             )
         elif j.job_type == "routing_classification":
             from ..workers.tasks import run_routing_classification
@@ -302,6 +290,8 @@ def _resume_job_task(job_id: str) -> None:
                 params.get("force", False),
                 user_id,
                 params.get("review_only", False),
+                params.get("recurring", False),
+                params.get("auto_approve", False),
             )
     finally:
         db.close()

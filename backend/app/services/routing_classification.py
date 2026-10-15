@@ -93,6 +93,8 @@ class RoutingClassificationOrchestrator:
         force: bool = False,
         plan_id: Optional[str] = None,
         review_only: bool = False,
+        recurring: bool = False,
+        auto_approve: bool = False,
     ) -> Optional[str]:
         self.job_service.start_job(job_id)
         self.job_service.update_progress(
@@ -122,6 +124,8 @@ class RoutingClassificationOrchestrator:
                     "limit": limit,
                     "force": force,
                     "review_only": review_only,
+                    "recurring": recurring,
+                    "auto_approve": auto_approve,
                 },
                 status="draft",
             )
@@ -145,7 +149,9 @@ class RoutingClassificationOrchestrator:
         plan.status = "ready"
         self.db.commit()
 
-        if review_only:
+        if auto_approve:
+            self._apply_auto_apply_items(plan.id, approve_all=True)
+        elif review_only:
             for item in self.plan_service.list_items(plan.id):
                 if item.status == "approved":
                     item.status = "pending"
@@ -552,10 +558,17 @@ class RoutingClassificationOrchestrator:
     # Auto-apply
     # ------------------------------------------------------------------
 
-    def _apply_auto_apply_items(self, plan_id: str) -> None:
+    def _apply_auto_apply_items(
+        self,
+        plan_id: str,
+        *,
+        approve_all: bool = False,
+    ) -> None:
         items = self.plan_service.list_items(plan_id)
         for item in items:
-            if not item.auto_apply or item.status != "approved":
+            if approve_all and item.status == "pending":
+                item.status = "approved"
+            if item.status != "approved" or (not approve_all and not item.auto_apply):
                 continue
             try:
                 result = self.writeback_service.apply_item(item)

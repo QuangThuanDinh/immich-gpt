@@ -10,6 +10,7 @@ from .app_setting import AppSetting
 from .routing_example import RoutingExample
 from .routing_plan import RoutingPlan, RoutingPlanItem
 from .routing_evaluation import RoutingEvaluation, RoutingEvaluationItem
+from .workflow_schedule import WorkflowSchedule
 
 __all__ = [
     "User",
@@ -27,4 +28,5 @@ __all__ = [
     "RoutingPlanItem",
     "RoutingEvaluation",
     "RoutingEvaluationItem",
+    "WorkflowSchedule",
 ]

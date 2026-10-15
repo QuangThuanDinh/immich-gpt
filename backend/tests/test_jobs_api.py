@@ -159,7 +159,7 @@ def test_get_job_fields(client, db):
 # ---------------------------------------------------------------------------
 
 def test_start_sync_job(client):
-    with patch("app.routers.jobs._enqueue") as mock_enqueue:
+    with patch("app.workers.executor.enqueue") as mock_enqueue:
         r = client.post("/api/jobs/sync")
     assert r.status_code == 200
     data = r.json()
@@ -169,7 +169,7 @@ def test_start_sync_job(client):
 
 
 def test_start_sync_job_creates_db_record(client, db):
-    with patch("app.routers.jobs._enqueue"):
+    with patch("app.workers.executor.enqueue"):
         r = client.post("/api/jobs/sync")
     job_id = r.json()["job_id"]
     job = db.query(JobRun).filter(JobRun.id == job_id).first()
@@ -178,35 +178,35 @@ def test_start_sync_job_creates_db_record(client, db):
 
 
 def test_start_sync_job_persists_route_after_sync(client, db):
-    with patch("app.routers.jobs._enqueue") as mock_enqueue:
+    with patch("app.workers.executor.enqueue") as mock_enqueue:
         r = client.post("/api/jobs/sync", json={"scope": "all", "run_routing_after": True})
     assert r.status_code == 200
     job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
     assert job.params_json["run_routing_after"] is True
     assert job.params_json["quick_sync"] is False
     assert job.params_json["full_sync"] is False
-    assert mock_enqueue.call_args.args[-3:] == (True, False, False)
+    assert mock_enqueue.call_args.args[5:8] == (True, False, False)
 
 
 def test_start_sync_job_persists_full_sync(client, db):
-    with patch("app.routers.jobs._enqueue") as mock_enqueue:
+    with patch("app.workers.executor.enqueue") as mock_enqueue:
         r = client.post("/api/jobs/sync", json={"scope": "all", "full_sync": True})
 
     assert r.status_code == 200
     job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
     assert job.params_json["full_sync"] is True
-    assert mock_enqueue.call_args.args[-2:] == (True, False)
+    assert mock_enqueue.call_args.args[6:8] == (True, False)
 
 
 def test_start_sync_job_persists_quick_sync(client, db):
-    with patch("app.routers.jobs._enqueue") as mock_enqueue:
+    with patch("app.workers.executor.enqueue") as mock_enqueue:
         r = client.post("/api/jobs/sync", json={"scope": "all", "quick_sync": True})
 
     assert r.status_code == 200
     job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
     assert job.params_json["quick_sync"] is True
     assert job.params_json["full_sync"] is False
-    assert mock_enqueue.call_args.args[-2:] == (False, True)
+    assert mock_enqueue.call_args.args[6:8] == (False, True)
 
 
 def test_start_sync_job_rejects_conflicting_modes(client):
@@ -608,7 +608,7 @@ def test_start_routing_classify_persists_review_only(client, db):
     assert r.status_code == 200
     job = db.query(JobRun).filter(JobRun.id == r.json()["job_id"]).first()
     assert job.params_json["review_only"] is True
-    assert mock_enqueue.call_args.args[-1] is True
+    assert mock_enqueue.call_args.args[-3] is True
 
 
 def test_resume_routing_classification_uses_original_plan(db, monkeypatch):

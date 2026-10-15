@@ -19,6 +19,7 @@ import app.models.app_setting  # noqa
 import app.models.routing_example  # noqa
 import app.models.routing_plan  # noqa
 import app.models.routing_evaluation  # noqa
+import app.models.workflow_schedule  # noqa
 
 from app.database import Base, get_db
 from app.main import app

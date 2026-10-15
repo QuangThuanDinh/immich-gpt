@@ -58,6 +58,53 @@ def enqueue(fn, *args) -> None:
     submit(fn, *args)
 
 
+def enqueue_asset_sync(
+    db: Session,
+    user_id: str,
+    scope: str = "all",
+    album_ids: Optional[List[str]] = None,
+    run_routing_after: bool = False,
+    full_sync: bool = False,
+    quick_sync: bool = False,
+    recurring: bool = False,
+    auto_approve: bool = False,
+    schedule_id: Optional[str] = None,
+) -> str:
+    """Create an asset-sync job and enqueue the worker."""
+    from ..services.job_progress import JobProgressService
+    from ..workers.tasks import run_asset_sync
+
+    params = {
+        "scope": scope,
+        "album_ids": album_ids,
+        "run_routing_after": run_routing_after,
+        "quick_sync": quick_sync,
+        "full_sync": full_sync,
+        "recurring": recurring,
+        "auto_approve": auto_approve,
+        "schedule_id": schedule_id,
+    }
+    job = JobProgressService(db).create_job(
+        "asset_sync",
+        params=params,
+        user_id=user_id,
+    )
+    enqueue(
+        run_asset_sync,
+        job.id,
+        scope,
+        album_ids,
+        user_id,
+        run_routing_after,
+        full_sync,
+        quick_sync,
+        recurring,
+        auto_approve,
+        schedule_id,
+    )
+    return job.id
+
+
 def enqueue_routing_classification(
     db: Session,
     user_id: str,
@@ -65,6 +112,9 @@ def enqueue_routing_classification(
     limit: Optional[int] = None,
     force: bool = False,
     review_only: bool = False,
+    recurring: bool = False,
+    auto_approve: bool = False,
+    schedule_id: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Create a routing-classification job + plan and enqueue the worker."""
     from ..services.job_progress import JobProgressService
@@ -79,6 +129,9 @@ def enqueue_routing_classification(
             "limit": limit,
             "force": force,
             "review_only": review_only,
+            "recurring": recurring,
+            "auto_approve": auto_approve,
+            "schedule_id": schedule_id,
         },
         user_id=user_id,
     )
@@ -89,6 +142,9 @@ def enqueue_routing_classification(
             "limit": limit,
             "force": force,
             "review_only": review_only,
+            "recurring": recurring,
+            "auto_approve": auto_approve,
+            "schedule_id": schedule_id,
         },
         status="draft",
     )
@@ -97,11 +153,22 @@ def enqueue_routing_classification(
         "limit": limit,
         "force": force,
         "review_only": review_only,
+        "recurring": recurring,
+        "auto_approve": auto_approve,
+        "schedule_id": schedule_id,
         "plan_id": plan.id,
     }
     db.commit()
     enqueue(
         run_routing_classification,
-        job.id, plan.id, asset_ids, limit, force, user_id, review_only,
+        job.id,
+        plan.id,
+        asset_ids,
+        limit,
+        force,
+        user_id,
+        review_only,
+        recurring,
+        auto_approve,
     )
     return job.id, plan.id

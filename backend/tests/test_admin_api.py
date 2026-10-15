@@ -210,8 +210,9 @@ class TestAdminDeleteUser:
         assert r.status_code == 404
 
     def test_delete_user_removes_owned_data(self, admin_client, db):
-        """Hard-deleting a user must also remove their buckets."""
+        """Hard-deleting a user must also remove their owned runtime data."""
         from app.models.bucket import Bucket
+        from app.models.workflow_schedule import WorkflowSchedule
         # Create user and verify they have buckets
         r = admin_client.post("/api/admin/users", json={
             "email": "todelete@test.com", "username": "todelete",
@@ -220,7 +221,17 @@ class TestAdminDeleteUser:
         assert r.status_code == 200
         user_id = r.json()["id"]
         assert db.query(Bucket).filter(Bucket.user_id == user_id).count() > 0
+        db.add(WorkflowSchedule(
+            user_id=user_id,
+            daily_time="06:00",
+            timezone="UTC",
+            enabled=True,
+        ))
+        db.commit()
 
         # Delete and verify buckets gone
         admin_client.delete(f"/api/admin/users/{user_id}")
         assert db.query(Bucket).filter(Bucket.user_id == user_id).count() == 0
+        assert db.query(WorkflowSchedule).filter(
+            WorkflowSchedule.user_id == user_id,
+        ).count() == 0
