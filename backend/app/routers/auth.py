@@ -1,283 +1,145 @@
-"""
-Authentication router: login, logout, me, password flows, and first-run setup.
-"""
+"""OIDC-only login and application session endpoints."""
 import logging
+from html import escape
 
+from authlib.integrations.base_client.errors import OAuthError
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
+import httpx
+from joserfc.errors import JoseError
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import Optional
+from starlette.concurrency import run_in_threadpool
 
-from ..limiter import limiter
-
+from ..config import settings, validate_oidc_url
 from ..database import get_db
-from ..config import settings
-from ..dependencies import get_current_user, require_admin
-from ..models.user import User
-from ..models.audit_log import AuditLog
-from ..services.auth_service import (
-    authenticate_user,
-    create_session,
-    delete_session,
-    create_reset_token,
-    consume_reset_token,
-    verify_password,
-)
-from ..services.user_service import (
-    change_password,
-    create_user,
-    get_user_by_email,
-    get_user_by_id,
-)
+from ..dependencies import get_current_user
+from ..limiter import limiter
+from ..services.auth_service import create_session, delete_session
+from ..services.oidc_service import resolve_oidc_user, verified_oidc_client
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-_COOKIE = settings.SESSION_COOKIE_NAME
-_SECURE = settings.SESSION_COOKIE_SECURE
-_SAMESITE = settings.SESSION_COOKIE_SAMESITE
-
-
-def _set_session_cookie(response: Response, session_id: str) -> None:
-    response.set_cookie(
-        key=_COOKIE,
-        value=session_id,
-        httponly=True,
-        secure=_SECURE,
-        samesite=_SAMESITE,
-        max_age=7 * 24 * 3600,
-        path="/",
-    )
-
-
-def _clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(key=_COOKIE, path="/", secure=_SECURE, samesite=_SAMESITE)
-
-
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
 
 
 class UserOut(BaseModel):
     id: str
-    email: str
+    email: str | None
     username: str
     role: str
-    force_password_change: bool
+    force_password_change: bool = False
 
 
-class ChangePasswordRequest(BaseModel):
-    current_password: str
-    new_password: str
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: str
-
-
-class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str
-
-
-class SetupRequest(BaseModel):
-    email: str
-    username: str
-    password: str
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-@router.post("/login", response_model=UserOut)
-@limiter.limit("10/minute")
-def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
-    user = authenticate_user(db, body.username, body.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-
-    ip = request.client.host if request.client else None
-    ua = request.headers.get("user-agent")
-    session = create_session(db, user.id, ip_address=ip, user_agent=ua)
-    _set_session_cookie(response, session.id)
-
-    return UserOut(
-        id=user.id,
-        email=user.email,
-        username=user.username,
-        role=user.role,
-        force_password_change=user.force_password_change,
+def _set_session_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        key=settings.SESSION_COOKIE_NAME, value=session_id, httponly=True,
+        secure=settings.SESSION_COOKIE_SECURE or settings.oidc_secure,
+        samesite=settings.SESSION_COOKIE_SAMESITE, max_age=7 * 24 * 3600, path="/",
     )
+
+
+def _oidc_failure(request: Request, error: Exception):
+    request.session.clear()
+    # Provider error messages can include codes, tokens or secrets.
+    logger.warning("OIDC sign-in failed (%s)", type(error).__name__)
+    status = error.status_code if isinstance(error, HTTPException) else 401
+    if isinstance(error, (httpx.HTTPError, ValueError, TypeError, KeyError)):
+        status = 502
+    message = (error.detail if isinstance(error, HTTPException) and isinstance(error.detail, str)
+               else "Check your provider configuration and account status, then try again.")
+    return HTMLResponse(
+        '<!doctype html><html lang="en"><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<title>Sign-in failed</title><h1>OIDC sign-in failed</h1>'
+        f'<p>{escape(message)}</p>'
+        '<a href="/login">Return to sign in</a></html>',
+        status_code=status,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+
+
+@router.get("/oidc/status")
+def oidc_status():
+    return {"configured": settings.oidc_configured, "login_url": "/api/auth/oidc/login"}
+
+
+@router.get("/oidc/login")
+@limiter.limit("10/minute")
+async def oidc_login(request: Request):
+    try:
+        client = await verified_oidc_client()
+        response = await client.authorize_redirect(request, settings.OIDC_REDIRECT_URI, response_mode="query")
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+    except (HTTPException, OAuthError, JoseError, httpx.HTTPError, ValueError, TypeError, KeyError) as error:
+        return _oidc_failure(request, error)
+
+
+@router.get("/oidc/callback")
+async def oidc_callback(request: Request, db: Session = Depends(get_db)):
+    try:
+        if any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
+            raise HTTPException(status_code=400, detail="Duplicate OIDC callback parameter.")
+        if request.query_params.get("iss", settings.OIDC_ISSUER) != settings.OIDC_ISSUER:
+            raise HTTPException(status_code=400, detail="Invalid authorization response issuer.")
+        client = await verified_oidc_client()
+        token = await client.authorize_access_token(
+            request, claims_options={"iss": {"essential": True, "value": settings.OIDC_ISSUER}},
+            leeway=30,
+        )
+        identity = token.get("userinfo")
+        if not token.get("id_token") or not isinstance(identity, dict):
+            raise HTTPException(status_code=401, detail="A validated OIDC ID token is required.")
+        subject = identity.get("sub")
+        if not isinstance(subject, str) or not subject:
+            raise HTTPException(status_code=401, detail="OIDC subject is required.")
+        if "preferred_username" not in identity:
+            metadata = await client.load_server_metadata()
+            endpoint = metadata.get("userinfo_endpoint", "")
+            validate_oidc_url(endpoint, "userinfo_endpoint")
+            identity = await client.userinfo(token=token)
+            if identity.get("sub") != subject:
+                raise HTTPException(status_code=401, detail="UserInfo subject does not match the ID token.")
+        username = identity.get("preferred_username")
+        if not isinstance(username, str) or not username.strip():
+            raise HTTPException(status_code=401, detail="A non-empty preferred_username is required.")
+        email = identity.get("email")
+        email = email.strip().lower() if isinstance(email, str) and email.strip() else None
+        user = await run_in_threadpool(resolve_oidc_user, db, subject, username, email)
+        old_session = request.cookies.get(settings.SESSION_COOKIE_NAME)
+        if old_session:
+            await run_in_threadpool(delete_session, db, old_session)
+        session = await run_in_threadpool(
+            create_session,
+            db, user.id, ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"), auth_method="oidc",
+        )
+        request.session.clear()
+        response = RedirectResponse("/", status_code=303, headers={
+            "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+        })
+        _set_session_cookie(response, session.id)
+        return response
+    except (HTTPException, OAuthError, JoseError, httpx.HTTPError, ValueError, TypeError, KeyError) as error:
+        return _oidc_failure(request, error)
 
 
 @router.post("/logout")
 def logout(request: Request, response: Response, db: Session = Depends(get_db)):
-    session_id = request.cookies.get(_COOKIE)
+    session_id = request.cookies.get(settings.SESSION_COOKIE_NAME)
     if session_id:
         delete_session(db, session_id)
-    _clear_session_cookie(response)
+    request.session.clear()
+    response.delete_cookie(
+        key=settings.SESSION_COOKIE_NAME, path="/",
+        secure=settings.SESSION_COOKIE_SECURE or settings.oidc_secure,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+    )
     return {"logged_out": True}
 
 
 @router.get("/me", response_model=UserOut)
 def me(current_user=Depends(get_current_user)):
-    return UserOut(
-        id=current_user.id,
-        email=current_user.email,
-        username=current_user.username,
-        role=current_user.role,
-        force_password_change=current_user.force_password_change,
-    )
-
-
-@router.post("/change-password")
-def change_password_endpoint(
-    body: ChangePasswordRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    if not verify_password(body.current_password, current_user.hashed_password):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    if len(body.new_password) < 8:
-        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
-    change_password(
-        db,
-        current_user.id,
-        body.new_password,
-        clear_force_flag=True,
-        keep_session_id=request.cookies.get(_COOKIE),
-    )
-    return {"changed": True}
-
-
-@router.post("/forgot-password")
-def forgot_password(
-    body: ForgotPasswordRequest,
-    db: Session = Depends(get_db),
-    _admin=Depends(require_admin),
-):
-    """
-    Generate a password-reset token for the given email address.
-
-    Requires admin authentication. The raw token is returned once in the
-    response body so the admin UI can copy it without storing or re-reading it.
-    A future iteration can add email/SMTP delivery instead.
-    """
-    user = get_user_by_email(db, body.email)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=404, detail="User not found or inactive")
-
-    raw_token = create_reset_token(db, user.id)
-    return {
-        "message": "Reset token generated",
-        "token": raw_token,
-    }
-
-
-@router.post("/reset-password")
-def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
-    if len(body.new_password) < 8:
-        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
-
-    user_id = consume_reset_token(db, body.token)
-    if not user_id:
-        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
-
-    user = get_user_by_id(db, user_id)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=400, detail="User not found or inactive")
-
-    change_password(db, user_id, body.new_password, clear_force_flag=True)
-    return {"message": "Password has been reset. Please log in."}
-
-
-# ---------------------------------------------------------------------------
-# First-run setup: create the initial admin account
-# ---------------------------------------------------------------------------
-
-@router.get("/setup/status")
-def setup_status(db: Session = Depends(get_db)):
-    """Return whether the application needs initial setup.
-
-    Returns ``{"setup_required": true}`` when no users exist yet.
-    Once at least one user exists the flag is ``false``.  This endpoint is
-    always public so the frontend can conditionally show the setup screen.
-    """
-    user_count = db.query(User).count()
-    return {"setup_required": user_count == 0}
-
-
-@router.post("/setup", response_model=UserOut, status_code=201)
-@limiter.limit("5/minute")
-def create_first_admin(
-    body: SetupRequest,
-    request: Request,
-    response: Response,
-    db: Session = Depends(get_db),
-):
-    """Create the first admin account — available only when no users exist.
-
-    Once any user exists this endpoint returns **403** so it cannot be used
-    to bypass normal user-management flows.  The newly created account is
-    logged to the audit trail and the caller receives a session cookie so
-    they are immediately logged in.
-    """
-    user_count = db.query(User).count()
-    if user_count > 0:
-        raise HTTPException(
-            status_code=403,
-            detail="Setup already completed. Use admin user management to create additional users.",
-        )
-
-    if len(body.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-
-    if not body.email.strip():
-        raise HTTPException(status_code=400, detail="Email is required")
-
-    if not body.username.strip():
-        raise HTTPException(status_code=400, detail="Username is required")
-
-    user = create_user(
-        db,
-        email=body.email,
-        username=body.username,
-        password=body.password,
-        role="admin",
-        force_password_change=False,
-    )
-
-    import uuid as _uuid
-    db.add(AuditLog(
-        id=str(_uuid.uuid4()),
-        user_id=user.id,
-        action="first_admin_created",
-        status="success",
-        level="info",
-        source="setup",
-        details_json={"email": user.email, "username": user.username},
-    ))
-    db.commit()
-
-    logger.info("First admin account created via setup endpoint: %s", user.email)
-
-    ip = request.client.host if request.client else None
-    ua = request.headers.get("user-agent")
-    session = create_session(db, user.id, ip_address=ip, user_agent=ua)
-    _set_session_cookie(response, session.id)
-
-    return UserOut(
-        id=user.id,
-        email=user.email,
-        username=user.username,
-        role=user.role,
-        force_password_change=user.force_password_change,
-    )
+    return UserOut(id=current_user.id, email=current_user.email, username=current_user.username,
+                   role=current_user.role)

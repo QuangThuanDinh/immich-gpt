@@ -8,6 +8,10 @@
 
 immich-gpt is a self-hosted web app that connects to your Immich library, pulls thumbnails and metadata, asks an AI model for descriptions, tags, and routing destinations, and lets you approve every write-back before it reaches Immich.
 
+**Version 0.6.33** switches to OIDC-only login with automatic migration of
+existing accounts by `preferred_username`. Back up your database and configure
+your private OIDC provider before upgrading.
+
 ## Enhancements in this fork
 
 Compared with the original project, this fork includes:
@@ -96,7 +100,7 @@ Start here, then jump to the guide that matches your job.
 | [`docs/reverse-proxy.md`](docs/reverse-proxy.md) | Nginx, Caddy, Traefik, HTTPS, and SSE buffering |
 | [`docs/configuration.md`](docs/configuration.md) | Environment variables, provider settings, cookies, workers, CORS |
 | [`docs/architecture.md`](docs/architecture.md) | System design, data flow, jobs, storage, and write-back |
-| [`docs/troubleshooting.md`](docs/troubleshooting.md) | Startup, login, Immich connectivity, SSE, providers, password reset |
+| [`docs/troubleshooting.md`](docs/troubleshooting.md) | Startup, OIDC login, Immich connectivity, SSE, providers |
 | [`docs/development.md`](docs/development.md) | Local development, tests, frontend build, and Alembic |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute changes to the project |
 
@@ -115,6 +119,7 @@ The fastest path is Docker Compose.
    - `IMMICH_URL`
    - `IMMICH_API_KEY`
    - `DATA_DIR`
+   - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`
 
    `SECRET_KEY` can be left blank in Docker deployments. The container will generate one on first boot and persist it under `/data/.secret_key`.
 
@@ -126,7 +131,7 @@ The fastest path is Docker Compose.
 
 4. Open `http://localhost:8000`.
 
-5. Complete the first-run setup wizard to create the initial admin account.
+5. Select **Sign in with OIDC**. On a database with no accounts, the first OIDC user becomes admin.
 
 6. Open **Settings** and configure:
 
@@ -138,9 +143,91 @@ The fastest path is Docker Compose.
 
 8. Open **Routing plans**, review the grouped decisions, approve or reject items, then apply the approved changes.
 
-If you are serving the app behind HTTPS, set `SESSION_COOKIE_SECURE=true`. If you are running on a plain HTTP LAN, leave it `false`.
+OIDC requires HTTPS except for loopback development. Set `SESSION_COOKIE_SECURE=true`
+for HTTPS deployments; the OIDC callback also forces Secure application cookies when its configured URL is HTTPS.
 
 For full install details, read [`docs/getting-started.md`](docs/getting-started.md) and [`DOCKER.md`](DOCKER.md).
+
+## OIDC-only authentication and existing accounts
+
+Login uses your **existing private OIDC provider**. All provider usernames are
+accepted: there is no local email, domain, group or username allowlist, and no
+verified-email requirement. The provider must supply a non-empty
+`preferred_username` in the signed ID token or a subject-matched UserInfo
+response. Configure the existing application entirely through environment:
+
+```dotenv
+OIDC_ISSUER=https://identity.example.com/realms/private
+OIDC_CLIENT_ID=immich-gpt
+OIDC_CLIENT_SECRET=YOUR_CLIENT_SECRET
+OIDC_REDIRECT_URI=https://photos-ai.example.com/api/auth/oidc/callback
+OIDC_TOKEN_AUTH_METHOD=client_secret_basic
+SESSION_COOKIE_SECURE=true
+```
+
+Register a confidential web client with Authorization Code flow, PKCE S256 and
+the exact callback URL. The callback path is fixed; its public origin depends
+on your deployment. Issuer values must exactly match discovery metadata.
+`client_secret_post` is also supported. Native backend configuration is read
+from `backend/.env` or process environment; Compose forwards the root `.env`
+settings. For Vite development, use a loopback callback on the browser's
+frontend origin, such as `http://localhost:3000/api/auth/oidc/callback`.
+No configuration enables username/password login: missing OIDC configuration
+shows a configuration error, and partial configuration stops startup.
+
+**Existing accounts migrate automatically on their first successful OIDC login.**
+The provider's `preferred_username` must exactly match the old username
+(case-sensitive, not the email). The existing user ID, role, active/disabled
+status and all owned data/settings remain unchanged. After linking, the
+provider issuer + subject identify that account permanently; later username
+changes from that same identity update its display/login username without
+moving its data. A different identity cannot take an already-linked username.
+Username/email collisions fail explicitly rather than merging accounts.
+You must control usernames at the provider, since first-time username matching
+grants access to the matching account, including an existing administrator.
+
+New identities create normal user accounts and personal defaults. Email is
+optional and is not used to link accounts. Only on a completely empty database
+does the first OIDC login create the initial admin. Administrators may still
+pre-create exact usernames to assign roles and may disable/delete accounts.
+This does not make Immich data shared between users: existing per-user
+isolation remains.
+
+The database migration adds OIDC identity/session fields, makes email/password
+storage optional, clears password-change flags, and invalidates old sessions
+and reset tokens. Linking an existing account clears its stored password hash.
+The username/password, password-reset/change and setup endpoints and UI are
+removed; there is no password fallback. **Back up the persistent database
+before upgrading**, confirm provider usernames match existing account names,
+and configure OIDC before deploying the new image. A downgrade after creating
+or linking OIDC-only accounts requires operator credential restoration; it
+fails explicitly instead of deleting accounts or inventing credentials.
+
+Authentication stays in the existing FastAPI process/container. The approved
+new dependencies are `Authlib==1.9.5` and `itsdangerous==2.2.0`, with Authlib's
+JOSE dependencies; the existing HTTPX and cryptography libraries are reused.
+Install/build from `backend/requirements.txt` as before. No service, daemon,
+container, port, identity-provider bundle or worker is added. The existing
+background-job execution path does not change. At login, the backend makes
+outbound HTTPS requests to the configured provider's discovery, token, JWKS
+and sometimes UserInfo endpoints. Use your existing reverse proxy for HTTPS;
+no proxy is installed by this change.
+
+Ten-minute OIDC state/nonce/PKCE data uses a signed HttpOnly SameSite=Lax
+cookie (Secure for HTTPS); provider tokens are not stored in it or in the
+database. ID tokens are signature/issuer/audience/expiry/nonce validated.
+Application sessions retain their existing database-backed 24-hour idle and
+seven-day maximum lifetime and cookie policy. Logout revokes the app session,
+not the provider SSO session. Uvicorn callback access logs redact the query;
+configure your existing proxy to omit callback query strings from its logs too.
+Provider access revocation is enforced at the next OIDC login; disable a local
+account to revoke its active application sessions immediately.
+
+Deploy a newly built image and recreate the existing app container with the
+environment above; old published/running images do not change automatically.
+Start/stop commands remain `docker compose up -d` / `docker compose stop app`;
+native development still uses Uvicorn and Vite. Publishing a release does not
+deploy it to your server or configure your identity provider.
 
 ## Typical workflow
 
@@ -376,7 +463,7 @@ See [`docs/development.md`](docs/development.md) for local run commands, migrati
 - [x] Video thumbnail display through the authenticated Immich thumbnail proxy
 - [ ] Duplicate and junk heuristic pre-filter
 - [ ] Automated Evaluation suites and regression thresholds
-- [ ] SMTP or email delivery for password resets
+- [ ] Additional OIDC account-management integrations
 
 The roadmap is directional and may change as Immich APIs and provider capabilities evolve.
 

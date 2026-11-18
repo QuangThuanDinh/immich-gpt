@@ -158,81 +158,37 @@ class TestRoutingPlanPageSize:
 # ---------------------------------------------------------------------------
 
 class TestLoginCookieFlags:
-    """Verify that the login endpoint sets the expected cookie attributes."""
+    def test_oidc_cookie_is_http_only_and_uses_existing_session_name(self):
+        from fastapi import Response
+        from app.routers.auth import _set_session_cookie
+        response = Response()
+        _set_session_cookie(response, "opaque-session")
+        assert "HttpOnly" in response.headers["set-cookie"]
+        assert "session_id=opaque-session" in response.headers["set-cookie"]
 
-    def test_login_sets_httponly_cookie(self, db):
-        """The session cookie set on login must always be HttpOnly."""
-        from app.main import app
-        from app.database import get_db
-        from app.models.user import User
-        from app.services.auth_service import hash_password
-        from fastapi.testclient import TestClient
-        from unittest.mock import patch
-        import uuid
+    def test_https_oidc_forces_secure_application_cookie(self, monkeypatch):
+        from fastapi import Response
+        from app.config import settings
+        from app.routers.auth import _set_session_cookie
+        monkeypatch.setattr(settings, "OIDC_REDIRECT_URI", "https://app.example.test/api/auth/oidc/callback")
+        monkeypatch.setattr(settings, "SESSION_COOKIE_SECURE", False)
+        response = Response()
+        _set_session_cookie(response, "opaque-session")
+        assert "Secure" in response.headers["set-cookie"]
 
-        user = User(
-            id=str(uuid.uuid4()),
-            email="cookietest@test.com",
-            username="cookietest",
-            hashed_password=hash_password("cookiepass1"),
-            role="user",
-            is_active=True,
-            force_password_change=False,
-        )
-        db.add(user)
-        db.commit()
 
-        def override_get_db():
-            yield db
+class TestOIDCConfiguration:
+    def test_partial_configuration_fails(self):
+        with pytest.raises(ValidationError, match="Incomplete OIDC"):
+            _make_settings(OIDC_ISSUER="https://identity.example.test", OIDC_CLIENT_ID="",
+                           OIDC_CLIENT_SECRET="", OIDC_REDIRECT_URI="")
 
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app, raise_server_exceptions=True) as c:
-                r = c.post(
-                    "/api/auth/login",
-                    json={"username": "cookietest@test.com", "password": "cookiepass1"},
-                )
-        app.dependency_overrides.clear()
-
-        assert r.status_code == 200
-        # TestClient follows redirects and exposes cookies; check the raw
-        # Set-Cookie header for the HttpOnly flag.
-        set_cookie = r.headers.get("set-cookie", "")
-        assert "HttpOnly" in set_cookie or "httponly" in set_cookie.lower()
-
-    def test_login_sets_session_id_cookie(self, db):
-        """The session cookie key must be 'session_id' (default name)."""
-        from app.main import app
-        from app.database import get_db
-        from app.models.user import User
-        from app.services.auth_service import hash_password
-        from fastapi.testclient import TestClient
-        from unittest.mock import patch
-        import uuid
-
-        user = User(
-            id=str(uuid.uuid4()),
-            email="cookiename@test.com",
-            username="cookiename",
-            hashed_password=hash_password("cookiepass2"),
-            role="user",
-            is_active=True,
-            force_password_change=False,
-        )
-        db.add(user)
-        db.commit()
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app, raise_server_exceptions=True) as c:
-                r = c.post(
-                    "/api/auth/login",
-                    json={"username": "cookiename@test.com", "password": "cookiepass2"},
-                )
-        app.dependency_overrides.clear()
-
-        assert r.status_code == 200
-        assert "session_id" in r.cookies
+    @pytest.mark.parametrize("redirect", [
+        "http://app.example.test/api/auth/oidc/callback",
+        "https://app.example.test/wrong",
+        "https://app.example.test/api/auth/oidc/callback?query=1",
+    ])
+    def test_unsafe_or_incorrect_callback_is_rejected(self, redirect):
+        with pytest.raises(ValidationError):
+            _make_settings(OIDC_ISSUER="https://identity.example.test", OIDC_CLIENT_ID="app",
+                           OIDC_CLIENT_SECRET="secret", OIDC_REDIRECT_URI=redirect)

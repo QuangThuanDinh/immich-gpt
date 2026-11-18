@@ -1,5 +1,5 @@
 import React, { Suspense } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -13,10 +13,6 @@ const Settings = React.lazy(() => import("./pages/Settings"));
 const Assets = React.lazy(() => import("./pages/Assets"));
 const Logs = React.lazy(() => import("./pages/Logs"));
 const Login = React.lazy(() => import("./pages/Login"));
-const Setup = React.lazy(() => import("./pages/Setup"));
-const ForcePasswordChange = React.lazy(() => import("./pages/ForcePasswordChange"));
-const ForgotPassword = React.lazy(() => import("./pages/ForgotPassword"));
-const ResetPassword = React.lazy(() => import("./pages/ResetPassword"));
 const AdminUsers = React.lazy(() => import("./pages/AdminUsers"));
 
 function Guarded({ children }: { children: React.ReactNode }) {
@@ -36,11 +32,11 @@ export default function App() {
     <AuthProvider>
       <Routes>
         {/* Public routes */}
-        <Route path="/setup" element={<Suspense fallback={<PageFallback />}><Setup /></Suspense>} />
+        <Route path="/setup" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Suspense fallback={<PageFallback />}><Login /></Suspense>} />
-        <Route path="/forgot-password" element={<Suspense fallback={<PageFallback />}><ForgotPassword /></Suspense>} />
-        <Route path="/reset-password" element={<Suspense fallback={<PageFallback />}><ResetPassword /></Suspense>} />
-        <Route path="/change-password" element={<Suspense fallback={<PageFallback />}><ForcePasswordChange /></Suspense>} />
+        <Route path="/forgot-password" element={<Navigate to="/login" replace />} />
+        <Route path="/reset-password" element={<Navigate to="/login" replace />} />
+        <Route path="/change-password" element={<Navigate to="/login" replace />} />
 
           {/* Protected app routes */}
           <Route path="/" element={

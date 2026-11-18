@@ -11,6 +11,7 @@ application database.  They require no Redis, Immich, or OpenAI.
 """
 import os
 import tempfile
+from unittest.mock import patch
 import pytest
 from alembic.config import Config
 from alembic import command
@@ -33,7 +34,8 @@ def _run_with_temp_db(alembic_cfg: Config, fn):
     try:
         cfg = Config(alembic_cfg.config_file_name)
         cfg.set_main_option("sqlalchemy.url", f"sqlite:///{tmp_path}")
-        fn(cfg)
+        with patch.dict(os.environ, {"ALEMBIC_DATABASE_URL": f"sqlite:///{tmp_path}"}):
+            fn(cfg)
     finally:
         try:
             os.unlink(tmp_path)
@@ -114,4 +116,38 @@ def test_app_settings_constraints_support_atomic_user_key_upsert(alembic_cfg):
             )).scalar_one()
         assert value == "America/Los_Angeles"
 
+    _run_with_temp_db(alembic_cfg, run)
+
+
+def test_oidc_upgrade_preserves_existing_accounts_and_data_but_revokes_password_sessions(alembic_cfg):
+    def run(cfg):
+        command.upgrade(cfg, "1b2c3d4e5f6a")
+        engine = create_engine(cfg.get_main_option("sqlalchemy.url"))
+        try:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "INSERT INTO users (id, email, username, hashed_password, role, is_active, force_password_change) "
+                    "VALUES ('original', 'owner@example.test', 'owner', 'existing-hash', 'admin', 1, 1)"
+                ))
+                connection.execute(text(
+                    "INSERT INTO user_sessions (id, user_id, expires_at) "
+                    "VALUES ('old-session', 'original', '2099-01-01')"
+                ))
+                connection.execute(text(
+                    "INSERT INTO app_settings (id, user_id, key, value) "
+                    "VALUES ('original-setting', 'original', 'timezone', 'UTC')"
+                ))
+            command.upgrade(cfg, "head")
+            with engine.connect() as connection:
+                account = connection.execute(text("SELECT * FROM users WHERE id='original'")).mappings().one()
+                assert account["username"] == "owner" and account["role"] == "admin"
+                assert account["hashed_password"] == "existing-hash"
+                assert account["oidc_subject"] is None
+                assert account["force_password_change"] == 0
+                assert connection.execute(text("SELECT COUNT(*) FROM user_sessions")).scalar_one() == 0
+                assert connection.execute(text(
+                    "SELECT value FROM app_settings WHERE id='original-setting'"
+                )).scalar_one() == "UTC"
+        finally:
+            engine.dispose()
     _run_with_temp_db(alembic_cfg, run)

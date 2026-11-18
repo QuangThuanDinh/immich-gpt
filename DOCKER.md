@@ -23,6 +23,10 @@ docker run -d \
   -e IMMICH_URL=http://192.168.1.x:2283 \
   -e IMMICH_API_KEY=your-key \
   -e OPENAI_API_KEY=sk-... \
+  -e OIDC_ISSUER=https://identity.example.com/realms/private \
+  -e OIDC_CLIENT_ID=immich-gpt \
+  -e OIDC_CLIENT_SECRET=YOUR_CLIENT_SECRET \
+  -e OIDC_REDIRECT_URI=https://photos-ai.example.com/api/auth/oidc/callback \
   ghcr.io/titatom/immich-gpt:latest
 ```
 
@@ -42,9 +46,14 @@ docker compose up -d
 ## First login
 
 1. Open `http://your-server:8000` in a browser.
-2. The **setup wizard** appears on first visit (when no users exist yet).  Create the initial admin account with your chosen email, username, and password.
+2. Select **Sign in with OIDC**. On an empty database the first OIDC user becomes admin; existing accounts link by exact `preferred_username`, preserving data and roles. Password login is removed.
 3. Once logged in, go to **Settings → Immich Connection** to configure your Immich URL and API key if you did not set them via environment variables.
-4. Create additional user accounts via **Users** (admin sidebar link).
+4. Other provider users automatically get normal user accounts. Use **Users** to pre-create roles or disable/delete accounts. No username/email allowlist is applied.
+
+Configure the four `OIDC_` variables shown above and register the exact callback
+at your existing provider before login. Use HTTPS except for loopback development.
+Back up the database before upgrading; old password sessions are invalidated.
+See [OIDC configuration and migration](README.md#oidc-only-authentication-and-existing-accounts).
 
 ---
 

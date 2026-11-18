@@ -6,6 +6,8 @@ pydantic==2.10.3
 pydantic-settings==2.7.0
 tzdata==2026.5
 httpx==0.28.1
+Authlib==1.9.5
+itsdangerous==2.2.0
 pillow==12.2.0
 openai==1.59.3
 redis==5.2.1

@@ -28,8 +28,10 @@
     Multi-user: each person manages their own Immich connection, AI providers,
     buckets, and assets.
 
-    On first visit, a web setup wizard will guide you through creating the
-    initial admin account — no environment variables required.
+    Login is OIDC-only using your existing private identity provider.
+    Configure the OIDC environment fields below. All provider usernames are
+    accepted. Existing accounts link by exact preferred_username; only on an
+    empty database does the first OIDC user become admin.
 
     Single-container — no Redis, no separate worker process required.
     All jobs run in-process using a lightweight thread pool.
@@ -45,6 +47,7 @@
   <Requires>
     A running Immich instance reachable from this container.
     An OpenAI API key OR a locally-running Ollama instance.
+    An existing OIDC provider and an HTTPS public callback URL.
   </Requires>
 
   <!-- ── Ports ─────────────────────────────────────────────────────────── -->
@@ -159,6 +162,62 @@
     Required="false"
     Mask="false"
   >UTC</Config>
+
+  <Config
+    Name="OIDC Issuer"
+    Target="OIDC_ISSUER"
+    Default=""
+    Mode=""
+    Description="Exact issuer URL of your existing private OIDC provider."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"
+  ></Config>
+  <Config
+    Name="OIDC Client ID"
+    Target="OIDC_CLIENT_ID"
+    Default=""
+    Mode=""
+    Description="Confidential web-client ID registered at your OIDC provider."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"
+  ></Config>
+  <Config
+    Name="OIDC Client Secret"
+    Target="OIDC_CLIENT_SECRET"
+    Default=""
+    Mode=""
+    Description="Confidential client secret. No username/password login fallback."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"
+  ></Config>
+  <Config
+    Name="OIDC Callback URL"
+    Target="OIDC_REDIRECT_URI"
+    Default=""
+    Mode=""
+    Description="Exact registered HTTPS callback, e.g. https://photos-ai.example.com/api/auth/oidc/callback"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"
+  ></Config>
+  <Config
+    Name="OIDC Token Authentication"
+    Target="OIDC_TOKEN_AUTH_METHOD"
+    Default="client_secret_basic"
+    Mode=""
+    Description="Token endpoint authentication: client_secret_basic or client_secret_post."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"
+  >client_secret_basic</Config>
 
   <!-- ── Session security ───────────────────────────────────────────────── -->
   <Config

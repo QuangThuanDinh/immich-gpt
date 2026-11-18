@@ -157,18 +157,23 @@ Some assets may come from external libraries or have Immich-side restrictions. I
 
 Review the app logs and audit logs to see whether the routing plan write-back partially succeeded or was skipped with a warning.
 
-## Password reset expectations do not match the UI
+## OIDC login and migrated accounts
 
-Password reset is not email-driven yet.
+Login is OIDC-only; password login, password resets and the old setup wizard
+are removed. Configure `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
+and `OIDC_REDIRECT_URI` in the application environment. The registered callback
+must exactly match the public `/api/auth/oidc/callback` URL. HTTPS is required
+except on loopback.
 
-Current flow:
+For an existing account, the provider's `preferred_username` must match its
+old username exactly, including case. Missing usernames or conflicting
+already-linked identities are rejected; email is not used for migration.
+Disabled accounts remain disabled. All other provider usernames are accepted
+without an allowlist and create normal user accounts.
 
-1. an admin opens the password reset flow
-2. the backend generates a reset token
-3. the admin shares that token securely with the user
-4. the user resets the password using the token
-
-There is no SMTP-based mail delivery yet.
+Old sessions are intentionally revoked on upgrade. Sign in again through your
+provider. For identity-provider password recovery, use the provider's own UI.
+See the [migration notes](../README.md#oidc-only-authentication-and-existing-accounts).
 
 ## Frontend dev server cannot reach the backend
 

@@ -3,10 +3,11 @@ import asyncio
 import logging
 import logging.handlers
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
@@ -22,6 +23,18 @@ from .routers import (
 from .routers.auth import router as auth_router
 from .routers.admin import router as admin_router
 from .config import settings as app_settings
+
+
+class OIDCCallbackLogFilter(logging.Filter):
+    def filter(self, record):
+        if isinstance(record.args, tuple) and len(record.args) == 5:
+            address, method, target, version, status = record.args
+            if isinstance(target, str) and target.split("?", 1)[0] == "/api/auth/oidc/callback":
+                record.args = (address, method, "/api/auth/oidc/callback", version, status)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(OIDCCallbackLogFilter())
 
 
 def _configure_logging() -> None:
@@ -138,6 +151,14 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=app_settings.SECRET_KEY,
+    session_cookie="immich_oidc_login",
+    max_age=600,
+    same_site="lax",
+    https_only=app_settings.oidc_secure,
+)
 
 _cors_origins = app_settings.cors_origins_list
 app.add_middleware(
@@ -181,6 +202,8 @@ if _static_dir_exists:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str, request: Request):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
         # Serve real static files (e.g. logo.png, favicon) that Vite places at
         # the build root before falling back to the SPA index.html.
         static_root = os.path.realpath(static_dir)

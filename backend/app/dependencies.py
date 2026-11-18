@@ -25,12 +25,14 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     session = get_session(db, session_id)
-    if not session:
+    if not session or session.auth_method != "oidc":
         raise HTTPException(status_code=401, detail="Session expired or invalid")
 
     user = db.query(User).filter(User.id == session.user_id).first()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
+    if not user.oidc_subject or user.oidc_issuer != settings.OIDC_ISSUER:
+        raise HTTPException(status_code=401, detail="Sign in with the configured OIDC provider")
 
     return user
 
@@ -43,13 +45,7 @@ def require_admin(user=Depends(get_current_user)):
 
 
 def require_active_user(user=Depends(get_current_user)):
-    """Require a logged-in active user (any role). Enforces force_password_change gate."""
-    if user.force_password_change:
-        raise HTTPException(
-            status_code=403,
-            detail="Password change required before continuing",
-            headers={"X-Force-Password-Change": "true"},
-        )
+    """Require a logged-in active OIDC user (any role)."""
     return user
 
 

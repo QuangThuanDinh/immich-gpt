@@ -1,479 +1,265 @@
-"""
-Tests for /api/auth/* endpoints.
-Covers: login, logout, me, change-password, forgot-password, reset-password,
-force_password_change gate enforcement.
-"""
-import uuid
-import pytest
-from unittest.mock import patch
+"""Real OIDC protocol validation, account migration, and OIDC-only API tests."""
+import base64
+import hashlib
+import logging
+import time
+from urllib.parse import parse_qs, urlsplit
 
+from fastapi.testclient import TestClient
+import httpx
+from joserfc import jwt
+from joserfc.jwk import RSAKey
+import pytest
+
+from app.config import settings
+from app.database import get_db
+from app.main import app, OIDCCallbackLogFilter
+from app.models.bucket import Bucket
 from app.models.user import User
 from app.models.session import UserSession
-from app.services.auth_service import hash_password, create_session
-from tests.conftest import TEST_USER_ID, TEST_ADMIN_ID
+from app.services.auth_service import create_session
+from app.services.oidc_service import get_oidc_client
+from tests.conftest import TEST_USER_ID
+
+ISSUER = "https://identity.example.test"
+CALLBACK = "http://testserver/api/auth/oidc/callback"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def signing_key():
+    return RSAKey.generate_key(2048, parameters={"kid": "oidc-test"})
 
-def _make_user(
-    db,
-    email="test@example.com",
-    username="tester",
-    password="secret123",
-    role="user",
-    is_active=True,
-    force_password_change=False,
-):
-    user = User(
-        id=str(uuid.uuid4()),
-        email=email,
-        username=username,
-        hashed_password=hash_password(password),
-        role=role,
-        is_active=is_active,
-        force_password_change=force_password_change,
-    )
-    db.add(user)
+
+@pytest.fixture
+def oidc(db, monkeypatch, signing_key):
+    monkeypatch.setattr(settings, "OIDC_ISSUER", ISSUER)
+    monkeypatch.setattr(settings, "OIDC_CLIENT_ID", "immich")
+    monkeypatch.setattr(settings, "OIDC_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setattr(settings, "OIDC_REDIRECT_URI", CALLBACK)
+    monkeypatch.setattr(settings, "SESSION_COOKIE_SECURE", False)
+    get_oidc_client.cache_clear()
+    state = {"claims": {}, "nonce": "", "challenge": "", "fail": False, "userinfo": {},
+             "bad_signature": False, "metadata": {}}
+
+    def provider(request):
+        if state["fail"]:
+            raise httpx.ConnectError("sensitive provider error", request=request)
+        if request.url.path == "/.well-known/openid-configuration":
+            data = {
+                "issuer": ISSUER, "authorization_endpoint": ISSUER + "/authorize",
+                "token_endpoint": ISSUER + "/token", "jwks_uri": ISSUER + "/jwks",
+                "userinfo_endpoint": ISSUER + "/userinfo",
+                "id_token_signing_alg_values_supported": ["RS256"],
+                **state["metadata"],
+            }
+        elif request.url.path == "/token":
+            form = parse_qs(request.content.decode())
+            assert form["grant_type"] == ["authorization_code"]
+            assert form["code"] == ["test-code"]
+            assert form["redirect_uri"] == [CALLBACK]
+            assert request.headers["authorization"].startswith("Basic ")
+            challenge = base64.urlsafe_b64encode(
+                hashlib.sha256(form["code_verifier"][0].encode()).digest()
+            ).rstrip(b"=").decode()
+            assert challenge == state["challenge"]
+            claims = {
+                "iss": ISSUER, "sub": "provider-user", "aud": "immich",
+                "iat": int(time.time()), "exp": int(time.time()) + 3600,
+                "nonce": state["nonce"], "preferred_username": "testuser",
+                **state["claims"],
+            }
+            claims = {key: value for key, value in claims.items() if value is not None}
+            key = RSAKey.generate_key(2048, parameters={"kid": "oidc-test"}) if state["bad_signature"] else signing_key
+            data = {"access_token": "test-provider-token", "token_type": "Bearer",
+                    "id_token": jwt.encode({"alg": "RS256", "kid": "oidc-test"}, claims, key)}
+        elif request.url.path == "/jwks":
+            data = {"keys": [signing_key.as_dict(private=False)]}
+        elif request.url.path == "/userinfo":
+            data = state["userinfo"]
+        else:
+            pytest.fail(f"Unexpected provider request: {request.method} {request.url.path}")
+        return httpx.Response(200, json=data)
+
+    get_oidc_client().client_kwargs["transport"] = httpx.MockTransport(provider)
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+    try:
+        yield client, state
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        get_oidc_client.cache_clear()
+
+
+def begin_login(client, state):
+    response = client.get("/api/auth/oidc/login", follow_redirects=False)
+    assert response.status_code in {302, 307}
+    params = parse_qs(urlsplit(response.headers["location"]).query)
+    assert params["scope"] == ["openid profile email"]
+    assert params["code_challenge_method"] == ["S256"]
+    assert params["redirect_uri"] == [CALLBACK]
+    state["nonce"], state["challenge"] = params["nonce"][0], params["code_challenge"][0]
+    return "/api/auth/oidc/callback?state=" + params["state"][0] + "&code=test-code"
+
+
+def sign_in(client, state):
+    callback = begin_login(client, state)
+    return client.get(callback, follow_redirects=False)
+
+
+@pytest.mark.parametrize("role", ["user", "admin"])
+def test_link_existing_username_preserves_data_and_role_and_retires_password(db, oidc, role):
+    client, state = oidc
+    user = db.get(User, TEST_USER_ID)
+    user.force_password_change = True
+    user.role = role
     db.commit()
+    old_session = create_session(db, user.id)
+    old_id = old_session.id
+    buckets = {bucket.id for bucket in db.query(Bucket).filter_by(user_id=user.id)}
+    response = sign_in(client, state)
+    assert response.status_code == 303, response.text
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["id"] == user.id
+    assert me.json()["role"] == role
+    assert me.json()["force_password_change"] is False
     db.refresh(user)
-    return user
+    assert user.oidc_issuer == ISSUER and user.oidc_subject == "provider-user"
+    assert user.hashed_password is None
+    assert {bucket.id for bucket in db.query(Bucket).filter_by(user_id=user.id)} == buckets
+    assert db.get(UserSession, old_id) is None
+    cookie = response.headers["set-cookie"]
+    assert "session_id=" in cookie and "HttpOnly" in cookie
+    assert client.post("/api/auth/logout").status_code == 200
+    assert client.get("/api/auth/me").status_code == 401
+
+
+def test_accept_all_new_usernames_without_email_and_seed_personal_defaults(db, oidc):
+    client, state = oidc
+    for index, username in enumerate(("new-user", "Private User", "name@example.test")):
+        state["claims"] = {"sub": f"new-{index}", "preferred_username": username, "email_verified": False}
+        assert sign_in(client, state).status_code == 303
+        me = client.get("/api/auth/me").json()
+        assert me["username"] == username and me["email"] is None and me["role"] == "user"
+        assert db.query(Bucket).filter_by(user_id=me["id"]).count() == 4
+
+
+def test_first_oidc_user_bootstraps_admin_only_on_empty_database(db, oidc):
+    client, state = oidc
+    db.query(Bucket).delete()
+    db.query(User).delete()
+    db.commit()
+    assert sign_in(client, state).status_code == 303
+    assert client.get("/api/auth/me").json()["role"] == "admin"
+    state["claims"] = {"sub": "second", "preferred_username": "second"}
+    assert sign_in(client, state).status_code == 303
+    assert client.get("/api/auth/me").json()["role"] == "user"
+
+
+def test_stable_subject_keeps_existing_account_after_username_change_and_cannot_steal_another(db, oidc):
+    client, state = oidc
+    assert sign_in(client, state).status_code == 303
+    original_id = client.get("/api/auth/me").json()["id"]
+    state["claims"] = {"preferred_username": "renamed"}
+    assert sign_in(client, state).status_code == 303
+    assert client.get("/api/auth/me").json()["id"] == original_id
+    assert client.get("/api/auth/me").json()["username"] == "renamed"
+    state["claims"] = {"sub": "attacker", "preferred_username": "renamed"}
+    assert sign_in(client, state).status_code == 409
+    assert db.get(User, original_id).oidc_subject == "provider-user"
+
+
+def test_username_link_is_exact_and_disabled_accounts_stay_disabled(db, oidc):
+    client, state = oidc
+    state["claims"] = {"preferred_username": "TestUser"}
+    assert sign_in(client, state).status_code == 303
+    assert client.get("/api/auth/me").json()["id"] != TEST_USER_ID
+    user = db.get(User, TEST_USER_ID)
+    user.is_active = False
+    db.commit()
+    state["claims"] = {"sub": "disabled", "preferred_username": "testuser"}
+    assert sign_in(client, state).status_code == 403
+    db.refresh(user)
+    assert user.oidc_subject is None
+
+
+@pytest.mark.parametrize("claims", [
+    {"iss": "https://attacker.test"}, {"aud": "wrong-client"},
+    {"nonce": "wrong"}, {"nonce": None}, {"exp": time.time() - 120},
+    {"preferred_username": ""}, {"preferred_username": " "}, {"preferred_username": 17},
+    {"sub": ""}, {"aud": ["immich", "another"], "azp": "wrong-client"},
+])
+def test_invalid_identity_is_rejected_without_linking(db, oidc, claims):
+    client, state = oidc
+    state["claims"] = claims
+    assert sign_in(client, state).status_code in {401, 502}
+    assert db.get(User, TEST_USER_ID).oidc_subject is None
+    assert client.get("/api/auth/me").status_code == 401
+
+
+def test_bad_signature_and_unbound_or_replayed_state_are_rejected(db, oidc):
+    client, state = oidc
+    state["bad_signature"] = True
+    assert sign_in(client, state).status_code == 401
+    state["bad_signature"] = False
+    callback = begin_login(client, state)
+    assert client.get(callback.replace("state=", "state=wrong"), follow_redirects=False).status_code == 401
+    callback = begin_login(client, state)
+    assert client.get(callback, follow_redirects=False).status_code == 303
+    assert client.get(callback, follow_redirects=False).status_code == 401
+
+
+def test_userinfo_username_requires_matching_subject(oidc):
+    client, state = oidc
+    state["claims"] = {"preferred_username": None}
+    state["userinfo"] = {"sub": "other", "preferred_username": "testuser"}
+    assert sign_in(client, state).status_code == 401
+    state["userinfo"]["sub"] = "provider-user"
+    assert sign_in(client, state).status_code == 303
+
+
+def test_provider_failures_are_explicit_and_never_expose_errors(oidc):
+    client, state = oidc
+    state["fail"] = True
+    response = client.get("/api/auth/oidc/login")
+    assert response.status_code == 502
+    assert "sensitive provider error" not in response.text
+
 
+def test_legacy_sessions_are_rejected_even_for_linked_users(db, oidc):
+    client, state = oidc
+    assert sign_in(client, state).status_code == 303
+    session = create_session(db, TEST_USER_ID)
+    client.cookies.set(settings.SESSION_COOKIE_NAME, session.id)
+    assert client.get("/api/auth/me").status_code == 401
 
-def _auth_client(app, db, user):
-    """Return a TestClient with a valid session cookie for the given user."""
-    from fastapi.testclient import TestClient
-    from app.database import get_db
-    from app.dependencies import get_current_user, require_active_user, require_admin
 
-    def override_get_db():
-        yield db
+@pytest.mark.parametrize("path", ["login", "setup", "change-password", "forgot-password", "reset-password"])
+def test_local_password_and_setup_endpoints_are_removed(client, path):
+    response = client.post("/api/auth/" + path, json={
+        "username": "testuser", "password": "testpassword",
+        "email": "testuser@example.com", "current_password": "testpassword",
+        "new_password": "newpass123", "token": "token",
+    })
+    assert response.status_code in {404, 405}
+    assert "session_id" not in response.cookies
 
-    def override_get_current_user():
-        return user
 
-    def override_require_active_user():
-        return user
+def test_removed_setup_status_is_not_served_as_spa_html(client):
+    assert client.get("/api/auth/setup/status").status_code == 404
 
-    app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_current_user] = override_get_current_user
-    app.dependency_overrides[require_active_user] = override_require_active_user
 
-    with patch("app.main.init_db"):
-        with TestClient(app, raise_server_exceptions=True) as c:
-            yield c
+def test_missing_oidc_configuration_has_no_password_fallback(client, monkeypatch):
+    monkeypatch.setattr(settings, "OIDC_ISSUER", "")
+    get_oidc_client.cache_clear()
+    assert client.get("/api/auth/oidc/status").json()["configured"] is False
+    assert client.get("/api/auth/oidc/login").status_code == 503
 
-    app.dependency_overrides.clear()
 
-
-# ---------------------------------------------------------------------------
-# POST /api/auth/login
-# ---------------------------------------------------------------------------
-
-class TestLogin:
-    def test_login_success(self, db):
-        from app.main import app
-        from app.database import get_db
-        from fastapi.testclient import TestClient
-
-        user = _make_user(db, email="login@test.com", password="goodpass")
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post("/api/auth/login", json={"username": "login@test.com", "password": "goodpass"})
-
-        app.dependency_overrides.clear()
-
-        assert r.status_code == 200
-        data = r.json()
-        assert data["email"] == "login@test.com"
-        assert data["role"] == "user"
-        assert "force_password_change" in data
-        assert "session_id" in r.cookies
-
-    def test_login_wrong_password(self, db):
-        from app.main import app
-        from app.database import get_db
-        from fastapi.testclient import TestClient
-
-        _make_user(db, email="bad@test.com", password="correct")
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post("/api/auth/login", json={"username": "bad@test.com", "password": "wrong"})
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 401
-
-    def test_login_unknown_email(self, db):
-        from app.main import app
-        from app.database import get_db
-        from fastapi.testclient import TestClient
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post("/api/auth/login", json={"username": "nobody@test.com", "password": "x"})
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 401
-
-    def test_login_disabled_user(self, db):
-        from app.main import app
-        from app.database import get_db
-        from fastapi.testclient import TestClient
-
-        _make_user(db, email="disabled@test.com", password="pass", is_active=False)
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post("/api/auth/login", json={"username": "disabled@test.com", "password": "pass"})
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 401
-
-
-# ---------------------------------------------------------------------------
-# GET /api/auth/me
-# ---------------------------------------------------------------------------
-
-class TestMe:
-    def test_me_returns_current_user(self, client, test_user):
-        r = client.get("/api/auth/me")
-        assert r.status_code == 200
-        assert r.json()["id"] == test_user.id
-        assert r.json()["email"] == test_user.email
-
-    def test_me_unauthenticated(self, db):
-        from app.main import app
-        from app.database import get_db
-        from fastapi.testclient import TestClient
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.get("/api/auth/me")
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 401
-
-
-# ---------------------------------------------------------------------------
-# POST /api/auth/logout
-# ---------------------------------------------------------------------------
-
-class TestLogout:
-    def test_logout_success(self, client):
-        r = client.post("/api/auth/logout")
-        assert r.status_code == 200
-        assert r.json()["logged_out"] is True
-
-
-# ---------------------------------------------------------------------------
-# POST /api/auth/change-password
-# ---------------------------------------------------------------------------
-
-class TestChangePassword:
-    def test_change_password_success(self, client, test_user, db):
-        r = client.post(
-            "/api/auth/change-password",
-            json={"current_password": "testpassword", "new_password": "newpass123"},
-        )
-        assert r.status_code == 200
-        assert r.json()["changed"] is True
-
-        # Verify password was actually changed
-        db.refresh(test_user)
-        from app.services.auth_service import verify_password
-        assert verify_password("newpass123", test_user.hashed_password)
-        assert test_user.force_password_change is False
-
-    def test_change_password_wrong_current(self, client):
-        r = client.post(
-            "/api/auth/change-password",
-            json={"current_password": "wrong_password", "new_password": "newpass123"},
-        )
-        assert r.status_code == 400
-
-    def test_change_password_too_short(self, client):
-        r = client.post(
-            "/api/auth/change-password",
-            json={"current_password": "testpassword", "new_password": "short"},
-        )
-        assert r.status_code == 400
-
-    def test_change_password_revokes_other_sessions(self, db):
-        from app.main import app
-        from app.database import get_db
-        from fastapi.testclient import TestClient
-
-        user = _make_user(db, email="multi-session@test.com", password="oldpass123")
-        keep = create_session(db, user.id)
-        revoke = create_session(db, user.id)
-        keep_id = keep.id
-        revoke_id = revoke.id
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                c.cookies.set("session_id", keep_id)
-                r = c.post(
-                    "/api/auth/change-password",
-                    json={"current_password": "oldpass123", "new_password": "newpass123"},
-                )
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 200
-        assert db.query(UserSession).filter(UserSession.id == keep_id).first() is not None
-        assert db.query(UserSession).filter(UserSession.id == revoke_id).first() is None
-
-
-# ---------------------------------------------------------------------------
-# force_password_change gate
-# ---------------------------------------------------------------------------
-
-class TestForcePasswordChangeGate:
-    def test_force_change_blocks_api_access(self, db):
-        """require_active_user must raise 403 when force_password_change=True."""
-        from app.main import app
-        from app.database import get_db
-        from app.dependencies import get_current_user
-        from fastapi.testclient import TestClient
-
-        blocked_user = _make_user(
-            db, email="blocked@test.com", password="x", force_password_change=True
-        )
-
-        def override_get_db():
-            yield db
-
-        def override_get_current_user():
-            return blocked_user
-
-        app.dependency_overrides[get_db] = override_get_db
-        app.dependency_overrides[get_current_user] = override_get_current_user
-
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.get("/api/routing/nodes")
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 403
-        assert "Password change required" in r.json()["detail"]
-
-    def test_force_change_allows_change_password_endpoint(self, db):
-        """change-password itself must work even with force_password_change=True."""
-        from app.main import app
-        from app.database import get_db
-        from app.dependencies import get_current_user
-        from fastapi.testclient import TestClient
-
-        user = _make_user(
-            db, email="mustchange@test.com", password="oldpass", force_password_change=True
-        )
-
-        def override_get_db():
-            yield db
-
-        def override_get_current_user():
-            return user
-
-        app.dependency_overrides[get_db] = override_get_db
-        app.dependency_overrides[get_current_user] = override_get_current_user
-
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post(
-                    "/api/auth/change-password",
-                    json={"current_password": "oldpass", "new_password": "newpass123"},
-                )
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 200
-        assert r.json()["changed"] is True
-
-
-# ---------------------------------------------------------------------------
-# POST /api/auth/forgot-password + reset-password
-# ---------------------------------------------------------------------------
-
-class TestPasswordReset:
-    def test_forgot_password_returns_token_for_known_email(self, db):
-        """Admin can generate a reset token for a known user."""
-        from app.main import app
-        from app.database import get_db
-        from app.dependencies import get_current_user, require_active_user, require_admin
-        from fastapi.testclient import TestClient
-
-        admin = _make_user(db, email="fpadmin@test.com", username="fpadmin", password="adminpass", role="admin")
-        _make_user(db, email="reset@test.com", username="resetuser", password="pass")
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        app.dependency_overrides[get_current_user] = lambda: admin
-        app.dependency_overrides[require_active_user] = lambda: admin
-        app.dependency_overrides[require_admin] = lambda: admin
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post("/api/auth/forgot-password", json={"email": "reset@test.com"})
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 200
-        assert "token" in r.json()
-        assert "note" not in r.json()
-
-    def test_forgot_password_unknown_email_returns_404(self, db):
-        """Admin gets a 404 for a user that does not exist (admin-only endpoint)."""
-        from app.main import app
-        from app.database import get_db
-        from app.dependencies import get_current_user, require_active_user, require_admin
-        from fastapi.testclient import TestClient
-
-        admin = _make_user(db, email="fpadmin2@test.com", username="fpadmin2", password="adminpass", role="admin")
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        app.dependency_overrides[get_current_user] = lambda: admin
-        app.dependency_overrides[require_active_user] = lambda: admin
-        app.dependency_overrides[require_admin] = lambda: admin
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post("/api/auth/forgot-password", json={"email": "nobody@test.com"})
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 404
-
-    def test_forgot_password_requires_admin(self, db):
-        """Unauthenticated callers receive 401."""
-        from app.main import app
-        from app.database import get_db
-        from fastapi.testclient import TestClient
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post("/api/auth/forgot-password", json={"email": "anyone@test.com"})
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 401
-
-    def test_reset_password_with_valid_token(self, db):
-        from app.main import app
-        from app.database import get_db
-        from app.services.auth_service import create_reset_token
-        from fastapi.testclient import TestClient
-
-        user = _make_user(db, email="tokenreset@test.com", password="oldpass")
-        raw_token = create_reset_token(db, user.id)
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post(
-                    "/api/auth/reset-password",
-                    json={"token": raw_token, "new_password": "brandnewpass"},
-                )
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 200
-        db.refresh(user)
-        from app.services.auth_service import verify_password
-        assert verify_password("brandnewpass", user.hashed_password)
-
-    def test_reset_password_revokes_all_sessions(self, db):
-        from app.main import app
-        from app.database import get_db
-        from app.services.auth_service import create_reset_token
-        from fastapi.testclient import TestClient
-
-        user = _make_user(db, email="tokenreset-sessions@test.com", password="oldpass")
-        create_session(db, user.id)
-        create_session(db, user.id)
-        raw_token = create_reset_token(db, user.id)
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post(
-                    "/api/auth/reset-password",
-                    json={"token": raw_token, "new_password": "brandnewpass"},
-                )
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 200
-        assert db.query(UserSession).filter(UserSession.user_id == user.id).count() == 0
-
-    def test_reset_password_invalid_token(self, db):
-        from app.main import app
-        from app.database import get_db
-        from fastapi.testclient import TestClient
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                r = c.post(
-                    "/api/auth/reset-password",
-                    json={"token": "bogus-token", "new_password": "newpass123"},
-                )
-
-        app.dependency_overrides.clear()
-        assert r.status_code == 400
-
-    def test_reset_token_cannot_be_reused(self, db):
-        from app.main import app
-        from app.database import get_db
-        from app.services.auth_service import create_reset_token
-        from fastapi.testclient import TestClient
-
-        user = _make_user(db, email="onetime@test.com", password="oldpass")
-        raw_token = create_reset_token(db, user.id)
-
-        def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-        with patch("app.main.init_db"):
-            with TestClient(app) as c:
-                c.post("/api/auth/reset-password", json={"token": raw_token, "new_password": "pass1234"})
-                r2 = c.post("/api/auth/reset-password", json={"token": raw_token, "new_password": "pass5678"})
-
-        app.dependency_overrides.clear()
-        assert r2.status_code == 400
+def test_callback_access_log_redacts_query():
+    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, "%s %s %s %s %s",
+                               ("client", "GET", "/api/auth/oidc/callback?code=secret&state=state", "1.1", 303), None)
+    OIDCCallbackLogFilter().filter(record)
+    assert "secret" not in record.getMessage()
+    assert "/api/auth/oidc/callback" in record.getMessage()

@@ -38,8 +38,7 @@ class TestAdminAccessControl:
 
     def test_non_admin_cannot_create_user(self, client):
         r = client.post("/api/admin/users", json={
-            "email": "x@x.com", "username": "x", "password": "pass1234",
-            "role": "user", "force_password_change": True,
+            "email": "x@x.com", "username": "x", "role": "user",
         })
         assert r.status_code == 403
 
@@ -82,9 +81,7 @@ class TestAdminCreateUser:
         payload = {
             "email": "newuser@test.com",
             "username": "newuser",
-            "password": "goodpass1",
             "role": "user",
-            "force_password_change": True,
         }
         r = admin_client.post("/api/admin/users", json=payload)
         assert r.status_code == 200
@@ -92,21 +89,21 @@ class TestAdminCreateUser:
         assert data["email"] == "newuser@test.com"
         assert data["username"] == "newuser"
         assert data["role"] == "user"
-        assert data["force_password_change"] is True
+        assert data["force_password_change"] is False
         assert "hashed_password" not in data
 
-    def test_create_user_short_password_rejected(self, admin_client):
+    def test_create_user_password_credentials_rejected(self, admin_client):
         r = admin_client.post("/api/admin/users", json={
             "email": "short@test.com", "username": "short",
             "password": "abc", "role": "user", "force_password_change": False,
         })
-        assert r.status_code == 400
+        assert r.status_code == 422
 
     def test_create_user_duplicate_email_rejected(self, admin_client, db):
         _make_extra_user(db, email="dup@test.com", username="dup1")
         r = admin_client.post("/api/admin/users", json={
             "email": "dup@test.com", "username": "dup2",
-            "password": "goodpass1", "role": "user", "force_password_change": False,
+            "role": "user",
         })
         assert r.status_code == 409
 
@@ -115,7 +112,7 @@ class TestAdminCreateUser:
         from app.models.bucket import Bucket
         r = admin_client.post("/api/admin/users", json={
             "email": "seeded@test.com", "username": "seeded",
-            "password": "goodpass1", "role": "user", "force_password_change": False,
+            "role": "user",
         })
         assert r.status_code == 200
         user_id = r.json()["id"]
@@ -130,7 +127,7 @@ class TestAdminCreateUser:
         from app.models.bucket import Bucket
         r = admin_client.post("/api/admin/users", json={
             "email": "adminseeded@test.com", "username": "adminseeded",
-            "password": "goodpass1", "role": "admin", "force_password_change": False,
+            "role": "admin",
         })
         assert r.status_code == 200
         user_id = r.json()["id"]
@@ -163,8 +160,7 @@ class TestAdminUpdateUser:
     def test_set_force_password_change(self, admin_client, db):
         user = _make_extra_user(db, email="fpc@test.com", username="fpc")
         r = admin_client.patch(f"/api/admin/users/{user.id}", json={"force_password_change": True})
-        assert r.status_code == 200
-        assert r.json()["force_password_change"] is True
+        assert r.status_code == 422
 
     def test_update_nonexistent_user(self, admin_client):
         r = admin_client.patch(f"/api/admin/users/{uuid.uuid4()}", json={"is_active": False})
@@ -179,9 +175,7 @@ class TestAdminResetPassword:
     def test_reset_generates_token(self, admin_client, db):
         user = _make_extra_user(db, email="tok@test.com", username="tok")
         r = admin_client.post(f"/api/admin/users/{user.id}/reset-password", json={})
-        assert r.status_code == 200
-        assert "token" in r.json()
-        assert "note" not in r.json()
+        assert r.status_code in {404, 405}
 
     def test_reset_with_new_password_sets_force_change(self, admin_client, db):
         user = _make_extra_user(db, email="pw@test.com", username="pw")
@@ -189,8 +183,7 @@ class TestAdminResetPassword:
             f"/api/admin/users/{user.id}/reset-password",
             json={"new_password": "freshpass1"},
         )
-        assert r.status_code == 200
-        assert r.json()["force_password_change"] is True
+        assert r.status_code in {404, 405}
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +209,7 @@ class TestAdminDeleteUser:
         # Create user and verify they have buckets
         r = admin_client.post("/api/admin/users", json={
             "email": "todelete@test.com", "username": "todelete",
-            "password": "goodpass1", "role": "user", "force_password_change": False,
+            "role": "user",
         })
         assert r.status_code == 200
         user_id = r.json()["id"]

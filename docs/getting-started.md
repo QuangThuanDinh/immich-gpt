@@ -31,6 +31,7 @@ If you want the simplest path, use Docker Compose.
    - `DATA_DIR`
    - `IMMICH_URL`
    - `IMMICH_API_KEY`
+   - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`
 
    Optional but useful:
 
@@ -46,7 +47,7 @@ If you want the simplest path, use Docker Compose.
 
 4. Open `http://localhost:8000`.
 
-5. Complete the setup wizard to create the first admin account.
+5. Select **Sign in with OIDC**. The first OIDC login creates an admin only when no accounts exist.
 
 For alternate install paths, see [`../DOCKER.md`](../DOCKER.md).
 
@@ -64,7 +65,7 @@ openssl rand -hex 32
 
 ### `SESSION_COOKIE_SECURE`
 
-- Use `SESSION_COOKIE_SECURE=false` for plain HTTP on a local network
+- HTTP OIDC callbacks are allowed only on loopback for local development
 - Use `SESSION_COOKIE_SECURE=true` whenever the browser reaches the app over HTTPS
 
 If this value does not match your deployment, login will fail because the browser will reject the session cookie.
@@ -75,7 +76,12 @@ immich-gpt does not require Redis for normal use. Background jobs run in-process
 
 ## First login and initial setup
 
-On the first visit, immich-gpt shows a setup screen when no users exist yet. The account you create there becomes the first admin.
+Login is OIDC-only. Use your existing private provider; there is no username/password
+or setup-wizard fallback. All provider usernames are accepted. Existing accounts
+link once by exact, case-sensitive `preferred_username`, preserving roles and data.
+On an empty database only, the first OIDC user becomes admin. Configure the exact
+`/api/auth/oidc/callback` URL and back up your database before upgrading.
+See [OIDC configuration and migration](../README.md#oidc-only-authentication-and-existing-accounts).
 
 After login, the main navigation includes:
 

@@ -13,7 +13,7 @@
 #   cp .env.example .env   # fill in at minimum: DATA_DIR, IMMICH_URL
 #   docker compose up -d
 #
-# On first visit, a web setup wizard will create the initial admin account.
+# OIDC-only login: the first OIDC user becomes admin only on an empty database.
 #
 # Unraid users: DATA_DIR defaults to /mnt/user/appdata/immich-gpt.
 # All persistent data (SQLite DB, settings, job history) lives there.
@@ -22,7 +22,7 @@
 services:
 
   app:
-    image: ${IMMICH_GPT_IMAGE:-ghcr.io/quangthuandinh/immich-gpt:0.6.32}
+    image: ${IMMICH_GPT_IMAGE:-ghcr.io/quangthuandinh/immich-gpt:0.6.33}
     # `docker compose build` requires Docker Buildx >= 0.17.
     # On older Unraid / distro Docker installs, build locally with:
     #   ./build.sh
@@ -56,7 +56,12 @@ services:
       # Number of photos per page in Routing Plan review (1-100).
       ROUTING_PLAN_PAGE_SIZE: ${ROUTING_PLAN_PAGE_SIZE:-20}
       # ── Authentication ─────────────────────────────────────────────────
-      # The first admin account is created via the web setup wizard on first visit.
+      # Use your existing private OIDC provider. No password-login fallback.
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_TOKEN_AUTH_METHOD: ${OIDC_TOKEN_AUTH_METHOD:-client_secret_basic}
       # Cryptographic key for session cookies — auto-generated on first boot
       # and persisted to /data/.secret_key if not set here.
       # Supply your own: SECRET_KEY=$(openssl rand -hex 32)

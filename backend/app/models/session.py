@@ -13,6 +13,7 @@ class UserSession(Base):
     last_seen_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     ip_address = Column(String, nullable=True)
     user_agent = Column(String, nullable=True)
+    auth_method = Column(String, nullable=False, default="legacy", server_default="legacy")
 
 
 class PasswordResetToken(Base):

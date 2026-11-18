@@ -19,27 +19,26 @@ from ..services.auth_service import (
 
 def create_user(
     db: Session,
-    email: str,
+    email: Optional[str],
     username: str,
-    password: str,
+    password: Optional[str] = None,
     role: str = "user",
     force_password_change: bool = True,
 ) -> User:
     user = User(
         id=str(uuid.uuid4()),
-        email=email.lower().strip(),
+        email=email.lower().strip() if email else None,
         username=username.strip(),
-        hashed_password=hash_password(password),
+        hashed_password=hash_password(password) if password is not None else None,
         role=role,
         is_active=True,
         force_password_change=force_password_change,
     )
     db.add(user)
+    db.flush()
+    seed_user_defaults(db, user.id)
     db.commit()
     db.refresh(user)
-
-    # Seed personal defaults for every new user regardless of role
-    _seed_user_defaults(db, user.id)
 
     return user
 
@@ -228,7 +227,7 @@ DEFAULT_LEAVES = [
 ]
 
 
-def _seed_user_defaults(db: Session, user_id: str) -> None:
+def seed_user_defaults(db: Session, user_id: str) -> None:
     """Seed a starter routing tree for a new user."""
     from ..models.bucket import Bucket
 
@@ -248,5 +247,3 @@ def _seed_user_defaults(db: Session, user_id: str) -> None:
             privacy_rules_json=b.get("privacy_rules"),
             auto_apply_enabled=b.get("auto_apply_enabled", False),
         ))
-
-    db.commit()

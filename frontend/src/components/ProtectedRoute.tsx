@@ -22,10 +22,6 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Props
     return <Navigate to="/login" replace />;
   }
 
-  if (user.force_password_change) {
-    return <Navigate to="/change-password" replace />;
-  }
-
   if (requireAdmin && user.role !== "admin") {
     return <Navigate to="/" replace />;
   }

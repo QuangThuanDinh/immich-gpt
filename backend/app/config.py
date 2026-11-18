@@ -2,6 +2,19 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 from typing import List
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from urllib.parse import urlsplit
+
+
+def validate_oidc_url(value: str, name: str):
+    parsed = urlsplit(value)
+    if (parsed.scheme not in {"https", "http"} or not parsed.hostname
+            or parsed.username or parsed.password or parsed.fragment
+            or not value.isascii() or any(char.isspace() for char in value)
+            or (parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"})):
+        raise ValueError(f"{name} must use HTTPS (HTTP is allowed only on loopback).")
+    if parsed.port is not None and not 1 <= parsed.port <= 65535:
+        raise ValueError(f"{name} has an invalid port.")
+    return parsed
 
 # Minimum acceptable length for SECRET_KEY (256-bit entropy when hex-encoded).
 _SECRET_KEY_MIN_LENGTH = 32
@@ -20,7 +33,7 @@ _WEAK_SECRET_KEYS = {
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "Immich GPT"
-    APP_VERSION: str = "0.6.32"
+    APP_VERSION: str = "0.6.33"
     DEBUG: bool = False
     TZ: str = "UTC"
 
@@ -74,6 +87,36 @@ class Settings(BaseSettings):
     # when this is not supplied.  Generate manually with:
     #   python -c "import secrets; print(secrets.token_hex(32))"
     SECRET_KEY: str = ""
+
+    OIDC_ISSUER: str = ""
+    OIDC_CLIENT_ID: str = ""
+    OIDC_CLIENT_SECRET: str = ""
+    OIDC_REDIRECT_URI: str = ""
+    OIDC_TOKEN_AUTH_METHOD: str = "client_secret_basic"
+
+    @model_validator(mode="after")
+    def _validate_oidc(self) -> "Settings":
+        required = ("OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_REDIRECT_URI")
+        if not any(getattr(self, name) for name in required):
+            return self
+        missing = [name for name in required if not getattr(self, name).strip()]
+        if missing:
+            raise ValueError("Incomplete OIDC configuration: " + ", ".join(missing))
+        issuer = validate_oidc_url(self.OIDC_ISSUER, "OIDC_ISSUER")
+        redirect = validate_oidc_url(self.OIDC_REDIRECT_URI, "OIDC_REDIRECT_URI")
+        if issuer.query or redirect.query or redirect.path != "/api/auth/oidc/callback":
+            raise ValueError("OIDC_REDIRECT_URI must end at /api/auth/oidc/callback without query parameters.")
+        if self.OIDC_TOKEN_AUTH_METHOD not in {"client_secret_basic", "client_secret_post"}:
+            raise ValueError("Unsupported OIDC_TOKEN_AUTH_METHOD.")
+        return self
+
+    @property
+    def oidc_configured(self) -> bool:
+        return bool(self.OIDC_ISSUER and self.OIDC_CLIENT_ID and self.OIDC_CLIENT_SECRET and self.OIDC_REDIRECT_URI)
+
+    @property
+    def oidc_secure(self) -> bool:
+        return self.OIDC_REDIRECT_URI.startswith("https://")
 
     # CORS — comma-separated list of allowed origins.
     # Leave blank when the frontend is served by the same origin as the API

@@ -2,7 +2,7 @@ import { createContext } from "react";
 
 export interface AuthUser {
   id: string;
-  email: string;
+  email: string | null;
   username: string;
   role: "admin" | "user";
   force_password_change: boolean;
@@ -11,7 +11,6 @@ export interface AuthUser {
 export interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   isAdmin: boolean;

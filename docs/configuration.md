@@ -28,6 +28,8 @@ This makes environment variables a good way to provide sane defaults, while stil
 These remain process-level settings:
 
 - `SECRET_KEY`
+- `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`
+- `OIDC_TOKEN_AUTH_METHOD`
 - `SESSION_COOKIE_SECURE`
 - `SESSION_COOKIE_NAME`
 - `SESSION_COOKIE_SAMESITE`
@@ -56,7 +58,7 @@ These variables are primarily used by `.env.example` and `docker-compose.yml`.
 | `DATA_DIR` | `/mnt/user/appdata/immich-gpt` | Host path mounted to `/data` for the SQLite database, settings, job history, routing data, and generated secret |
 | `LOG_DIR` | unset | Optional host path mounted to `/logs` for persistent rotating logs |
 | `APP_PORT` | `8000` | Host port mapped to container port `8000` |
-| `IMMICH_GPT_IMAGE` | `ghcr.io/quangthuandinh/immich-gpt:0.6.28` | Image tag used by `docker-compose.yml` |
+| `IMMICH_GPT_IMAGE` | `ghcr.io/quangthuandinh/immich-gpt:0.6.33` | Image tag used by `docker-compose.yml` |
 
 ## Core runtime variables
 
@@ -89,6 +91,27 @@ ROUTING_PLAN_PAGE_SIZE=20
 server-side request forgery. Enable it only when the configured private or LAN
 services are trusted. `ROUTING_PLAN_PAGE_SIZE` accepts values from `1` through
 `100` and defaults to `20`.
+
+## OIDC-only authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OIDC_ISSUER` | empty | Exact issuer of your existing private OIDC provider |
+| `OIDC_CLIENT_ID` | empty | Confidential web-client ID |
+| `OIDC_CLIENT_SECRET` | empty | Confidential web-client secret; keep out of source control |
+| `OIDC_REDIRECT_URI` | empty | Exact public callback ending in `/api/auth/oidc/callback` |
+| `OIDC_TOKEN_AUTH_METHOD` | `client_secret_basic` | `client_secret_basic` or `client_secret_post` |
+
+These settings are environment-only and cannot be changed in the per-user UI.
+All provider users are accepted without a username or email allowlist.
+The provider must supply `preferred_username`; email is optional.
+Existing accounts link once by exact, case-sensitive username, then use issuer
+and subject. Roles and owned data are preserved. Missing configuration disables
+login rather than enabling a password fallback; partial configuration stops
+startup. HTTPS is required except for loopback development.
+
+See [OIDC migration and deployment](../README.md#oidc-only-authentication-and-existing-accounts)
+before upgrading an existing database.
 
 ## Immich and provider defaults
 

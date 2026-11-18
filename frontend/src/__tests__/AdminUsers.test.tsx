@@ -9,11 +9,10 @@ vi.mock("../services/api", () => ({
   adminListUsers: vi.fn(),
   adminCreateUser: vi.fn(),
   adminUpdateUser: vi.fn(),
-  adminResetPassword: vi.fn(),
   adminDeleteUser: vi.fn(),
 }));
 
-import { adminListUsers, adminResetPassword } from "../services/api";
+import { adminListUsers, adminCreateUser } from "../services/api";
 
 function renderPage() {
   const client = new QueryClient({
@@ -40,34 +39,26 @@ describe("AdminUsers", () => {
         created_at: "2026-05-05T10:00:00Z",
       },
     ]);
-    vi.mocked(adminResetPassword).mockResolvedValue({
-      token: "sensitive-reset-token",
-    });
-
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText: vi.fn().mockResolvedValue(undefined) },
-    });
   });
 
-  it("copies reset tokens without rendering the secret", async () => {
+  it("pre-creates OIDC accounts without password controls", async () => {
     renderPage();
-
-    await userEvent.click(await screen.findByTitle("Reset password"));
-
+    await userEvent.click(screen.getByRole("button", { name: /New User/ }));
+    expect(screen.queryByText("Password")).not.toBeInTheDocument();
+    const inputs = screen.getAllByRole("textbox");
+    await userEvent.type(inputs[1], "new-oidc-user");
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("sensitive-reset-token");
+      expect(adminCreateUser).toHaveBeenCalledWith({ email: "", username: "new-oidc-user", role: "user" }, expect.anything());
     });
-    expect(screen.getByText(/copied to your clipboard/i)).toBeInTheDocument();
-    expect(screen.queryByText("sensitive-reset-token")).not.toBeInTheDocument();
   });
 
   it("renders every user action", async () => {
     renderPage();
 
     expect(await screen.findByTitle("Disable")).toBeInTheDocument();
-    expect(screen.getByTitle("Reset password")).toBeInTheDocument();
-    expect(screen.getByTitle("Require password change")).toBeInTheDocument();
+    expect(screen.queryByTitle("Reset password")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Require password change")).not.toBeInTheDocument();
     expect(screen.getByTitle("Delete user")).toBeInTheDocument();
   });
 
@@ -97,7 +88,6 @@ describe("AdminUsers", () => {
     const first = await screen.findByRole("row", { name: "User first" });
     const second = screen.getByRole("row", { name: "User second" });
     const firstDisable = within(first).getByRole("button", { name: "Disable" });
-    const firstReset = within(first).getByRole("button", { name: "Reset password" });
     const firstDelete = within(first).getByRole("button", { name: "Delete user" });
 
     expect(first).toHaveAttribute("tabindex", "0");
@@ -108,8 +98,8 @@ describe("AdminUsers", () => {
     fireEvent.keyDown(first, { key: "ArrowRight" });
     expect(firstDisable).toHaveFocus();
     fireEvent.keyDown(firstDisable, { key: "ArrowRight" });
-    expect(firstReset).toHaveFocus();
-    fireEvent.keyDown(firstReset, { key: "ArrowUp" });
+    expect(firstDelete).toHaveFocus();
+    fireEvent.keyDown(firstDelete, { key: "ArrowUp" });
     expect(first).toHaveFocus();
     fireEvent.keyDown(first, { key: "ArrowLeft" });
     expect(firstDelete).toHaveFocus();

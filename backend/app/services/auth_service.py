@@ -43,6 +43,7 @@ def create_session(
     user_id: str,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    auth_method: str = "legacy",
 ) -> UserSession:
     now = datetime.now(timezone.utc)
     session = UserSession(
@@ -53,6 +54,7 @@ def create_session(
         last_seen_at=now,
         ip_address=ip_address,
         user_agent=user_agent,
+        auth_method=auth_method,
     )
     db.add(session)
     db.commit()
@@ -175,7 +177,7 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
         user = db.query(User).filter(User.email == needle.lower()).first()
     else:
         user = db.query(User).filter(User.username == needle).first()
-    if not user or not user.is_active:
+    if not user or not user.is_active or not user.hashed_password:
         return None
     if not verify_password(password, user.hashed_password):
         return None
